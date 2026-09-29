@@ -1,8 +1,7 @@
-# Written by the Recording panel and by runs; they stay in the assistant's
-# workspace and on the Jenkins agent.
-mobile/recordings/
-mobile/runs/
+# Run results stay on the agent (archived by the job) or on the laptop.
+runs/
 
-# The job's scratch space.
-.mobile-auto/
-.efp-bin/
+# Python
+.venv/
+__pycache__/
+*.pyc

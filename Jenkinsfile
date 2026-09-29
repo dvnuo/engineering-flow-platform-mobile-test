@@ -1,16 +1,18 @@
 // Mobile scenario runs for EFP assistants.
 //
-// The assistant commits compiled scripts (mobile/scripts/<KEY>/<platform>/*.yaml,
-// one per scenario row) to a branch of this repository and starts this job;
-// the job runs them on BrowserStack with mobile-auto and archives the
-// evidence. The assistant's pod never talks to BrowserStack; this agent does.
-// See README.md for the job setup.
+// The tests are a plain Python project: behave features under
+// features/<platform>/<KEY>/, step definitions and segment modules the
+// assistant generated, and the mobiletest helpers. This job installs the
+// requirements, runs the selected scenario rows in parallel on BrowserStack
+// (one session per Examples row), and publishes the Cucumber report, the JUnit
+// results, and the evidence. Nothing here needs EFP; the same command runs on
+// a laptop.
 //
-// The job is a "Pipeline script from SCM" job pointing at this repository, so
-// the scripts are checked out at the job root (mobile/ sits there) and the
-// results go to mobile/runs/<RUN_LABEL>/: every relative path in the matrix
-// and the evidence resolves the same way once the assistant unpacks them into
-// its workspace.
+// The job is a "Pipeline script from SCM" job pointing at this repository. A
+// build names the branch to run (the assistant pushes efp/<KEY> branches) and
+// the rows to run. Results go to runs/<RUN_LABEL>/. While the run goes, the
+// matrix is printed on one line prefixed EFP-MATRIX whenever it changes, so
+// the assistant can follow it from the console log.
 
 pipeline {
   agent { label "${params.AGENT_LABEL ?: 'linux'}" }
@@ -23,42 +25,39 @@ pipeline {
 
   parameters {
     string(name: 'SCRIPTS_REF', defaultValue: '', description: 'Branch, tag, or commit of this repository to run; empty runs the branch the job is configured with')
-    string(name: 'SCRIPTS', defaultValue: '', description: 'Space-separated script directories or files, relative to the repository root, for example mobile/scripts/FX-12/android mobile/scripts/FX-12/ios')
-    string(name: 'RUN_LABEL', defaultValue: '', description: 'Run id: the Portal task id, or chat-<time>. Results go to mobile/runs/<RUN_LABEL>/')
+    string(name: 'PLATFORMS', defaultValue: 'android ios', description: 'Space-separated platforms: android, ios')
+    string(name: 'TAGS', defaultValue: '', description: 'Space-separated behave tag expressions, all of which a scenario must match, for example @FX-12 or @FX-12 @positive; empty runs every scenario')
+    string(name: 'ROWS', defaultValue: '', description: 'Optional: only these rows, space-separated <scenario id>#<example> (or <platform>/<scenario id>#<example>), for a rerun')
+    string(name: 'CASE', defaultValue: '', description: 'Optional: only this scenario id')
+    string(name: 'EXAMPLE', defaultValue: '', description: 'Optional: only this Examples row name')
+    string(name: 'RUN_LABEL', defaultValue: '', description: 'Run id: the Portal task id, or chat-<time>. Results go to runs/<RUN_LABEL>/')
     string(name: 'PARALLEL', defaultValue: '4', description: 'Parallel BrowserStack sessions; the run waits for free ones')
-    string(name: 'CASE', defaultValue: '', description: 'Optional: run only this scenario (case name)')
-    string(name: 'MATRIX', defaultValue: '', description: 'Optional: run only this Examples row')
     booleanParam(name: 'COLLECT_VIDEO', defaultValue: true, description: 'Download each session video into the evidence')
     string(name: 'APP_FILE_URL', defaultValue: '', description: 'Optional: build to upload to BrowserStack first (.apk, .aab, .ipa), fetched by this agent')
-    string(name: 'APP_CUSTOM_ID', defaultValue: '', description: 'Custom id for that build; scripts that name it get the newest upload')
+    string(name: 'APP_CUSTOM_ID', defaultValue: '', description: 'Custom id for that build; the config files that name it get the newest upload')
     string(name: 'APP_CREDENTIALS_ID', defaultValue: '', description: 'Optional: username/password credentials for APP_FILE_URL (Nexus, Jenkins)')
-    string(name: 'MOBILE_AUTO_URL', defaultValue: '', description: 'Where to download the linux mobile-auto binary; empty uses mobile-auto on PATH')
     string(name: 'BROWSERSTACK_CREDENTIALS_ID', defaultValue: 'browserstack', description: 'Username/password credentials: BrowserStack username and access key')
-    string(name: 'TEST_SECRETS', defaultValue: '', description: 'Comma-separated NAME=credentialsId pairs: secret-text credentials exposed under the text_env names the scripts use, for example MOBILE_SECRET_PASSWORD=fx-uat-password')
+    string(name: 'TEST_SECRETS', defaultValue: '', description: 'Comma-separated NAME=credentialsId pairs: secret-text credentials exposed under the names the tests read with secret(), for example MOBILE_SECRET_PASSWORD=fx-uat-password')
+    string(name: 'PIP_INDEX_URL', defaultValue: '', description: 'Optional: a PyPI index (an internal Nexus proxy) for the requirements')
+    string(name: 'PYTHON', defaultValue: 'python3', description: 'The Python 3.9+ interpreter on the agent')
     string(name: 'AGENT_LABEL', defaultValue: 'linux', description: 'Agent label; the agent needs egress to BrowserStack')
-  }
-
-  environment {
-    MOBILE_AUTO_STATE_DIR = "${WORKSPACE}/.mobile-auto/state"
-    MOBILE_AUTO_ARTIFACTS_DIR = "${WORKSPACE}/.mobile-auto/artifacts"
   }
 
   stages {
     stage('Check parameters') {
       steps {
         script {
-          if (!params.SCRIPTS?.trim()) { error 'SCRIPTS is required' }
           if (!(params.RUN_LABEL ==~ /[A-Za-z0-9][A-Za-z0-9._-]{0,99}/)) { error 'RUN_LABEL must be letters, digits, dot, dash, or underscore' }
           if (!(params.PARALLEL ==~ /[1-9][0-9]?/)) { error 'PARALLEL must be a number from 1 to 99' }
-          for (String path : params.SCRIPTS.trim().split(/\s+/)) {
-            if (path.startsWith('/') || path.contains('..')) { error "SCRIPTS entries are paths inside the repository: ${path}" }
+          for (String platform : params.PLATFORMS.trim().split(/\s+/)) {
+            if (!(platform in ['android', 'ios'])) { error "PLATFORMS entries are android or ios: ${platform}" }
           }
-          currentBuild.description = "${params.RUN_LABEL}: ${params.SCRIPTS_REF ?: 'job branch'} ${params.SCRIPTS}"
+          currentBuild.description = "${params.RUN_LABEL}: ${params.SCRIPTS_REF ?: 'job branch'} ${params.PLATFORMS} ${params.TAGS} ${params.ROWS}".trim()
         }
       }
     }
 
-    stage('Check out scripts') {
+    stage('Check out') {
       steps {
         script {
           // The job's own SCM settings (this repository and its credentials)
@@ -76,18 +75,15 @@ pipeline {
       }
     }
 
-    stage('Install mobile-auto') {
+    stage('Python environment') {
       steps {
         sh '''#!/bin/bash
           set -euo pipefail
-          mkdir -p .efp-bin
-          if [ -n "${MOBILE_AUTO_URL}" ]; then
-            curl -fsSL -o .efp-bin/mobile-auto "${MOBILE_AUTO_URL}"
-            chmod +x .efp-bin/mobile-auto
-          else
-            ln -sf "$(command -v mobile-auto)" .efp-bin/mobile-auto
-          fi
-          .efp-bin/mobile-auto version --json
+          "${PYTHON}" -m venv .venv
+          index=()
+          if [ -n "${PIP_INDEX_URL}" ]; then index=(--index-url "${PIP_INDEX_URL}"); fi
+          .venv/bin/python -m pip install --quiet "${index[@]}" -r requirements.txt
+          .venv/bin/python -m behave --version
         '''
       }
     }
@@ -105,9 +101,10 @@ pipeline {
             else
               curl -fsSL -o "$name" "${APP_FILE_URL}"
             fi
-            args=(app upload --file "$name" --json)
-            if [ -n "${APP_CUSTOM_ID}" ]; then args+=(--custom-id "${APP_CUSTOM_ID}"); fi
-            .efp-bin/mobile-auto "${args[@]}"
+            form=(-F "file=@${name}")
+            if [ -n "${APP_CUSTOM_ID}" ]; then form+=(-F "custom_id=${APP_CUSTOM_ID}"); fi
+            curl -fsS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" -X POST "${BROWSERSTACK_API_URL:-https://api-cloud.browserstack.com}/app-automate/upload" "${form[@]}"
+            echo
             rm -f "$name"
           '''
           def account = [usernamePassword(credentialsId: params.BROWSERSTACK_CREDENTIALS_ID, usernameVariable: 'BROWSERSTACK_USERNAME', passwordVariable: 'BROWSERSTACK_ACCESS_KEY')]
@@ -135,42 +132,25 @@ pipeline {
           }
           def rc = 0
           withCredentials(bindings) {
-            // The matrix is printed on one line whenever it changes, prefixed
-            // EFP-MATRIX, so the assistant can follow the run from the
-            // console log while it goes; the files are archived at the end.
             rc = sh(returnStatus: true, script: '''#!/bin/bash
               set -uo pipefail
-              out="mobile/runs/${RUN_LABEL}"
-              rm -rf "$out"
-              mkdir -p "$out"
-              args=(test run --parallel "${PARALLEL}" --wait-capacity --run-label "${RUN_LABEL}" --build "${RUN_LABEL}"
-                    --matrix-out "$out/matrix.json" --evidence-dir "$out/cases"
-                    --junit-out "$out/junit.xml" --report-out "$out/report.json" --json)
-              for path in ${SCRIPTS}; do
-                if [ -d "$path" ]; then args+=(--dir "$path"); else args+=(--file "$path"); fi
-              done
+              rm -rf "runs/${RUN_LABEL}"
+              args=(-m mobiletest.run --label "${RUN_LABEL}" --out "runs/${RUN_LABEL}" --parallel "${PARALLEL}" --wait-capacity)
+              for platform in ${PLATFORMS}; do args+=(--platform "${platform}"); done
+              for tag in ${TAGS}; do args+=(--tags "${tag}"); done
+              for row in ${ROWS}; do args+=(--row "${row}"); done
               if [ -n "${CASE}" ]; then args+=(--case "${CASE}"); fi
-              if [ -n "${MATRIX}" ]; then args+=(--matrix "${MATRIX}"); fi
+              if [ -n "${EXAMPLE}" ]; then args+=(--example "${EXAMPLE}"); fi
               if [ "${COLLECT_VIDEO}" = "true" ]; then args+=(--collect-video); fi
-              .efp-bin/mobile-auto "${args[@]}" > "$out/run.json" 2> "$out/run.log" &
-              pid=$!
-              last=""
-              while kill -0 "$pid" 2>/dev/null; do
-                if [ -f "$out/matrix.json" ]; then
-                  cur="$(tr -d '\\n' < "$out/matrix.json")"
-                  if [ "$cur" != "$last" ]; then echo "EFP-MATRIX $cur"; last="$cur"; fi
-                fi
-                sleep 30
-              done
-              wait "$pid"
-              status=$?
-              if [ -f "$out/matrix.json" ]; then echo "EFP-MATRIX $(tr -d '\\n' < "$out/matrix.json")"; fi
-              exit $status
+              .venv/bin/python "${args[@]}"
             ''')
           }
+          if (rc == 2) {
+            error 'No scenario row matched PLATFORMS, TAGS, ROWS, CASE, and EXAMPLE'
+          }
           if (rc != 0) {
-            // Failed scenarios make the build unstable; the evidence still
-            // gets archived for triage.
+            // Failed scenarios make the build unstable; the evidence and the
+            // report are published either way.
             currentBuild.result = 'UNSTABLE'
           }
         }
@@ -182,13 +162,24 @@ pipeline {
     always {
       sh '''#!/bin/bash
         set -uo pipefail
-        out="mobile/runs/${RUN_LABEL}"
+        out="runs/${RUN_LABEL}"
         if [ -d "$out" ]; then
-          tar czf "$out/evidence.tar.gz" --exclude='*.mp4' --exclude='evidence.tar.gz' -C "$out" .
+          tar czf "$out/evidence.tar.gz" --exclude='*.mp4' --exclude='evidence.tar.gz' --exclude='behave' -C "$out" .
         fi
       '''
-      archiveArtifacts allowEmptyArchive: true, artifacts: "mobile/runs/${params.RUN_LABEL}/matrix.json, mobile/runs/${params.RUN_LABEL}/evidence.tar.gz, mobile/runs/${params.RUN_LABEL}/run.json, mobile/runs/${params.RUN_LABEL}/cases/**/video.mp4"
-      junit allowEmptyResults: true, testResults: "mobile/runs/${params.RUN_LABEL}/junit.xml"
+      script {
+        try {
+          cucumber buildStatus: 'UNSTABLE',
+            fileIncludePattern: 'cucumber.json',
+            jsonReportDirectory: "runs/${params.RUN_LABEL}/cucumber",
+            reportTitle: 'Mobile scenarios',
+            trendsLimit: 20
+        } catch (Exception e) {
+          echo "Cucumber report not published (is the Cucumber Reports plugin installed?): ${e}"
+        }
+      }
+      junit allowEmptyResults: true, testResults: "runs/${params.RUN_LABEL}/junit/**/*.xml"
+      archiveArtifacts allowEmptyArchive: true, artifacts: "runs/${params.RUN_LABEL}/matrix.json, runs/${params.RUN_LABEL}/report.json, runs/${params.RUN_LABEL}/evidence.tar.gz, runs/${params.RUN_LABEL}/cucumber/cucumber.json, runs/${params.RUN_LABEL}/cases/**/video.mp4"
     }
   }
 }
