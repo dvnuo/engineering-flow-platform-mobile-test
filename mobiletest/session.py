@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -100,11 +101,36 @@ def _get_json(url):
         return json.loads(response.read().decode("utf-8"))
 
 
+# The session page BrowserStack's REST API still hands out in browser_url and
+# public_url; the dashboard no longer serves it (a plain 404), only its
+# /dashboard/v2/ successor.
+LEGACY_SESSION_PATH = re.compile(r"^/builds/([^/]+)/sessions/([^/]+)/?$")
+
+
+def dashboard_url(raw, session_id=""):
+    """The session page to open: BrowserStack's own link brought to the
+    current dashboard when it is the retired form (a public link's auth_token
+    goes with the retired page, so the dashboard asks for a login instead),
+    any other link as it is, and the dashboard's session route when only the
+    session id is known."""
+    raw = (raw or "").strip()
+    if not raw:
+        return f"https://app-automate.browserstack.com/dashboard/v2/sessions/{urllib.parse.quote(session_id)}" if session_id else ""
+    parts = urllib.parse.urlsplit(raw)
+    host = (parts.hostname or "").lower()
+    if host not in ("app-automate.browserstack.com", "automate.browserstack.com"):
+        return raw
+    match = LEGACY_SESSION_PATH.match(parts.path)
+    if not match:
+        return raw
+    return f"https://{host}/dashboard/v2/builds/{match.group(1)}/sessions/{match.group(2)}"
+
+
 def details(session_id, wait_for_video=60):
     """The session's dashboard URL, device, and video URL (the video appears
     a little after the session ends, so this waits for it)."""
     if os.environ.get("MOBILETEST_FAKE_DRIVER"):
-        return {"public_url": f"https://app-automate.browserstack.com/sessions/{session_id}", "video_url": "", "device": "Fake device", "os_version": "1.0"}
+        return {"public_url": dashboard_url("", session_id), "video_url": "", "device": "Fake device", "os_version": "1.0"}
     url = f"{api_url()}/app-automate/sessions/{urllib.parse.quote(session_id)}.json"
     deadline = time.monotonic() + float(wait_for_video)
     info = {}
@@ -117,7 +143,7 @@ def details(session_id, wait_for_video=60):
             break
         time.sleep(5)
     return {
-        "public_url": info.get("public_url") or info.get("browser_url") or "",
+        "public_url": dashboard_url(info.get("browser_url") or info.get("public_url"), session_id),
         "video_url": info.get("video_url") or "",
         "device": info.get("device") or "",
         "os_version": info.get("os_version") or "",
