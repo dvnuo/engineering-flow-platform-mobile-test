@@ -38,6 +38,9 @@ pipeline {
     string(name: 'APP_CREDENTIALS_ID', defaultValue: '', description: 'Optional: username/password credentials for APP_FILE_URL (Nexus, Jenkins)')
     string(name: 'BROWSERSTACK_CREDENTIALS_ID', defaultValue: 'browserstack', description: 'Username/password credentials: BrowserStack username and access key')
     string(name: 'TEST_SECRETS', defaultValue: '', description: 'Comma-separated NAME=credentialsId pairs: secret-text credentials exposed under the names the tests read with secret(), for example MOBILE_SECRET_PASSWORD=fx-uat-password')
+    booleanParam(name: 'LOCAL', defaultValue: true, description: 'Start a BrowserStack Local tunnel on this agent for the run, for apps that talk to servers on the private network (the configs whose network is private use it)')
+    string(name: 'LOCAL_BINARY_URL', defaultValue: 'https://www.browserstack.com/browserstack-local/BrowserStackLocal-linux-x64.zip', description: 'Where to download the BrowserStackLocal binary (a copy in your artifact repository works); empty uses BrowserStackLocal on PATH')
+    string(name: 'LOCAL_PROXY', defaultValue: '', description: 'Optional: http://host:port the tunnel goes out through; empty uses HTTPS_PROXY of the agent')
     string(name: 'PIP_INDEX_URL', defaultValue: '', description: 'Optional: a PyPI index (an internal Nexus proxy) for the requirements')
     string(name: 'PYTHON', defaultValue: 'python3', description: 'The Python 3.9+ interpreter on the agent')
     string(name: 'AGENT_LABEL', defaultValue: 'linux', description: 'Agent label; the agent needs egress to BrowserStack')
@@ -116,6 +119,37 @@ pipeline {
       }
     }
 
+    stage('BrowserStack Local') {
+      when { expression { return params.LOCAL } }
+      steps {
+        script {
+          // One tunnel per build, named after the run; the sessions of the
+          // configs on a private network attach to it by that identifier.
+          withCredentials([usernamePassword(credentialsId: params.BROWSERSTACK_CREDENTIALS_ID, usernameVariable: 'BROWSERSTACK_USERNAME', passwordVariable: 'BROWSERSTACK_ACCESS_KEY')]) {
+            sh '''#!/bin/bash
+              set -euo pipefail
+              mkdir -p .efp-bin
+              if [ -n "${LOCAL_BINARY_URL}" ]; then
+                curl -fsSL -o .efp-bin/BrowserStackLocal.zip "${LOCAL_BINARY_URL}"
+                (cd .efp-bin && unzip -o -q BrowserStackLocal.zip && chmod +x BrowserStackLocal)
+                bin=.efp-bin/BrowserStackLocal
+              else
+                bin="$(command -v BrowserStackLocal)"
+              fi
+              args=(--key "${BROWSERSTACK_ACCESS_KEY}" --local-identifier "${RUN_LABEL}" --force-local --daemon start)
+              proxy="${LOCAL_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
+              if [ -n "$proxy" ]; then
+                hostport="${proxy#*://}"; hostport="${hostport%%/*}"; hostport="${hostport##*@}"
+                args+=(--proxy-host "${hostport%%:*}" --proxy-port "${hostport##*:}" --force-proxy)
+              fi
+              "$bin" "${args[@]}" > "runs/${RUN_LABEL}.local.log" 2>&1 || { cat "runs/${RUN_LABEL}.local.log" | sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g"; exit 1; }
+              sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g" "runs/${RUN_LABEL}.local.log"
+            '''
+          }
+        }
+      }
+    }
+
     stage('Run scenarios') {
       steps {
         script {
@@ -135,6 +169,7 @@ pipeline {
             rc = sh(returnStatus: true, script: '''#!/bin/bash
               set -uo pipefail
               rm -rf "runs/${RUN_LABEL}"
+              if [ "${LOCAL}" = "true" ]; then export BROWSERSTACK_LOCAL_IDENTIFIER="${RUN_LABEL}"; fi
               args=(-m mobiletest.run --label "${RUN_LABEL}" --out "runs/${RUN_LABEL}" --parallel "${PARALLEL}" --wait-capacity)
               for platform in ${PLATFORMS}; do args+=(--platform "${platform}"); done
               for tag in ${TAGS}; do args+=(--tags "${tag}"); done
@@ -165,6 +200,10 @@ pipeline {
         out="runs/${RUN_LABEL}"
         if [ -d "$out" ]; then
           tar czf "$out/evidence.tar.gz" --exclude='*.mp4' --exclude='evidence.tar.gz' --exclude='behave' -C "$out" .
+        fi
+        if [ "${LOCAL}" = "true" ]; then
+          bin=.efp-bin/BrowserStackLocal; [ -x "$bin" ] || bin="$(command -v BrowserStackLocal || true)"
+          [ -n "$bin" ] && "$bin" --local-identifier "${RUN_LABEL}" --daemon stop > /dev/null 2>&1 || true
         fi
       '''
       script {

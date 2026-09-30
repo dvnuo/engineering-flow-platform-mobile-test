@@ -18,7 +18,7 @@ After the export, the Python is the source: fixes go into the step definitions a
 | `features/<platform>/<KEY>/steps/<KEY>_steps.py` | Its step definitions: each Gherkin step calls segment functions and `mobiletest` helpers |
 | `features/<platform>/<KEY>/environment.py` | behave hooks (imports `mobiletest.hooks`): one BrowserStack session per scenario row, evidence per row |
 | `segments/<platform>/<segment>.py` | A recorded flow as a function of the driver and its parameters; passwords come from `secret("NAME")` |
-| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network, test data, the secrets the tests need, and the scenario titles' ids |
+| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`private-managed` when the app talks to servers on the private network), test data, the secrets the tests need, and the scenario titles' ids |
 | `mobiletest/` | The helpers: `find` with fallbacks and drift detection, actions, checks with timeouts, screenshots, the session, the runner, and the report |
 | `runs/<label>/` | A run's results (not committed): `matrix.json`, `cucumber/cucumber.json`, `junit/`, `cases/<row>/evidence.json` with screenshots and video, `logs/` |
 
@@ -27,6 +27,9 @@ After the export, the Python is the source: fixes go into the step definitions a
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 export BROWSERSTACK_USERNAME=... BROWSERSTACK_ACCESS_KEY=... MOBILE_SECRET_PASSWORD=...
+# An app on the private network: start a tunnel first and name it for the sessions
+BrowserStackLocal --key "$BROWSERSTACK_ACCESS_KEY" --local-identifier local-1 --daemon start
+export BROWSERSTACK_LOCAL_IDENTIFIER=local-1
 
 # Every row of FX-12 on Android, four devices at a time
 .venv/bin/python -m mobiletest.run --platform android --tags @FX-12 --parallel 4 --label local-1 --collect-video
@@ -59,8 +62,9 @@ The runner starts one `behave` process per scenario row, prints the matrix as `E
    - One *Secret text* per test account password the tests read with `secret("NAME")`. Recorded password fields name them, for example `MOBILE_SECRET_PASSWORD`; each `config/<KEY>.<platform>.yaml` lists the names its tests need. Builds pass them as `TEST_SECRETS=MOBILE_SECRET_PASSWORD=fx-uat-password,MOBILE_SECRET_PIN=fx-uat-pin`, each name mapped to its credentials id.
    - `APP_CREDENTIALS_ID` when builds come from Nexus or Jenkins behind a login.
 4. Install the **Cucumber Reports** plugin to see each run's report on the build page; without it the build still archives `cucumber.json` and publishes the JUnit results.
-5. Run the job once by hand with the parameters filled in; Jenkins only picks up a pipeline's parameters after its first run.
-6. Tell the assistant the job path and this repository once. The `generate-mobile-scripts` skill asks for them and keeps them in the scenario plan, together with the credentials ids of the test secrets.
+5. Apps on a private network: leave `LOCAL` on. The job downloads the BrowserStackLocal binary (`LOCAL_BINARY_URL`, a copy in your artifact repository works) and starts one tunnel per build, named after the run, through `LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions of the configs whose `network` is private attach to it. The agent must reach the app's servers. For apps on the public internet set `LOCAL` to false.
+6. Run the job once by hand with the parameters filled in; Jenkins only picks up a pipeline's parameters after its first run.
+7. Tell the assistant the job path and this repository once. The `generate-mobile-scripts` skill asks for them and keeps them in the scenario plan, together with the credentials ids of the test secrets.
 
 ### Parameters
 
@@ -75,6 +79,7 @@ The runner starts one `behave` process per scenario row, prints the matrix as `E
 | `COLLECT_VIDEO` | Download each session's video into the evidence (default on) |
 | `APP_FILE_URL`, `APP_CUSTOM_ID`, `APP_CREDENTIALS_ID` | Optional build to upload first; give every build of an app the same custom id |
 | `BROWSERSTACK_CREDENTIALS_ID`, `TEST_SECRETS` | Credentials, as above |
+| `LOCAL`, `LOCAL_BINARY_URL`, `LOCAL_PROXY` | A BrowserStack Local tunnel for the run (default on), where its binary comes from, and the proxy it goes out through |
 | `PIP_INDEX_URL`, `PYTHON`, `AGENT_LABEL` | The agent's Python and package index |
 
 ### What a build publishes

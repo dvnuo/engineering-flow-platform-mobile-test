@@ -70,9 +70,15 @@ def start(config, session_name, build_name=None, project_name=None):
     if config.get("os_version"):
         bstack["osVersion"] = str(config["os_version"])
     if str(config.get("network", "")).startswith("private"):
+        # The app is on a private network: the session goes through the
+        # BrowserStack Local tunnel the pipeline (or the tester) started,
+        # named by BROWSERSTACK_LOCAL_IDENTIFIER.
         bstack["local"] = True
-        if os.environ.get("BROWSERSTACK_LOCAL_IDENTIFIER"):
-            bstack["localIdentifier"] = os.environ["BROWSERSTACK_LOCAL_IDENTIFIER"]
+        identifier = os.environ.get("BROWSERSTACK_LOCAL_IDENTIFIER", "")
+        if identifier:
+            bstack["localIdentifier"] = identifier
+        else:
+            print(f"warning: {config.get('issue')} needs a private network but BROWSERSTACK_LOCAL_IDENTIFIER is not set; the session uses any tunnel of the account", flush=True)
     options.set_capability("bstack:options", bstack)
     return webdriver.Remote(hub_url(), options=options)
 
