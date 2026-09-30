@@ -1,0 +1,7 @@
+# Run results stay on the agent (archived by the job) or on the laptop.
+runs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc

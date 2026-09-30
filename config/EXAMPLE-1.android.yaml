@@ -1,0 +1,14 @@
+# mobile-auto export: source=mobile/suites/EXAMPLE-1/android.yaml source_sha256=98581449b22d13db4eff19b4e1caab626e89721cad17c97fd281d625acefcf5d content_sha256=42ec4ac67b0ceeca2b93d297dcafaf0bb848132c7eefe8c74d6cb5a17d381cdf
+issue: EXAMPLE-1
+issue_url: https://jira.example.com/browse/EXAMPLE-1
+platform: android
+app: fxapp-android-uat
+device: Google Pixel 8
+build: EXAMPLE-1
+data:
+    username: uat-fx-01
+secrets:
+    - MOBILE_SECRET_PASSWORD
+scenarios:
+    Buy foreign currency within the daily limit: buy-foreign-currency
+    Buying over the daily limit is refused: over-daily-limit
