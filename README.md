@@ -18,7 +18,7 @@ After the export, the Python is the source: fixes go into the step definitions a
 | `features/<platform>/<KEY>/steps/<KEY>_steps.py` | Its step definitions: each Gherkin step calls segment functions and `mobiletest` helpers |
 | `features/<platform>/<KEY>/environment.py` | behave hooks (imports `mobiletest.hooks`): one BrowserStack session per scenario row, evidence per row |
 | `segments/<platform>/<segment>.py` | A recorded flow as a function of the driver and its parameters; passwords come from `secret("NAME")` |
-| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`private-managed` when the app talks to servers on the private network), test data, the secrets the tests need, and the scenario titles' ids |
+| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`private-managed` when the app talks to servers on the private network), the Appium version BrowserStack runs (`appium_version`, 2.19.0 unless set; `BROWSERSTACK_APPIUM_VERSION` overrides it for a run), test data, the secrets the tests need, and the scenario titles' ids |
 | `mobiletest/` | The helpers: `find` with fallbacks and drift detection, actions, checks with timeouts, screenshots, the session, the runner, and the report |
 | `runs/<label>/` | A run's results (not committed): `matrix.json`, `cucumber/cucumber.json`, `junit/`, `cases/<row>/evidence.json` with screenshots and video, `logs/` |
 

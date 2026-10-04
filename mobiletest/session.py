@@ -14,6 +14,9 @@ from appium.options.ios import XCUITestOptions
 
 DEFAULT_HUB = "https://hub-cloud.browserstack.com/wd/hub"
 DEFAULT_API = "https://api-cloud.browserstack.com"
+# BrowserStack's own default, Appium 1.22.0, predates the mobile: commands the
+# recorded steps use; the recordings and replays ran on this version too.
+DEFAULT_APPIUM_VERSION = "2.19.0"
 
 
 def credentials():
@@ -26,6 +29,12 @@ def credentials():
 
 def hub_url():
     return os.environ.get("BROWSERSTACK_HUB_URL", DEFAULT_HUB)
+
+
+def appium_version(config):
+    """The Appium BrowserStack runs for the session: the config's
+    appium_version, else BROWSERSTACK_APPIUM_VERSION, else the default."""
+    return str(config.get("appium_version") or os.environ.get("BROWSERSTACK_APPIUM_VERSION") or DEFAULT_APPIUM_VERSION)
 
 
 def api_url():
@@ -65,6 +74,7 @@ def start(config, session_name, build_name=None, project_name=None):
         "debug": True,
         "networkLogs": False,
         "idleTimeout": int(os.environ.get("BROWSERSTACK_IDLE_TIMEOUT", "300")),
+        "appiumVersion": appium_version(config),
     }
     if config.get("device"):
         bstack["deviceName"] = str(config["device"])
