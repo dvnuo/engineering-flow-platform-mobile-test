@@ -27,8 +27,8 @@ After the export, the Python is the source: fixes go into the step definitions a
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 export BROWSERSTACK_USERNAME=... BROWSERSTACK_ACCESS_KEY=...
-# The test accounts: a JSON map of profiles (see "Test users" below); MOBILE_TEST_USER picks one
-export MOBILE_TEST_USERS_FILE=$HOME/mobile-test-users.json MOBILE_TEST_USER=default
+# The test accounts: a JSON map of profiles (see "Test users" below); MOBILE_TEST_USER picks one, default unless set
+export MOBILE_TEST_USERS_FILE=$HOME/mobile-test-users.json
 # An app on the private network: start a tunnel first and name it for the sessions
 BrowserStackLocal --key "$BROWSERSTACK_ACCESS_KEY" --local-identifier local-1 --daemon start
 export BROWSERSTACK_LOCAL_IDENTIFIER=local-1
@@ -61,7 +61,7 @@ The accounts the tests sign in with live in one JSON file, a map of profiles: `d
 }
 ```
 
-The team keeps it in Jenkins as a *Secret file* credential (`mobile-test-users`); a build hands it to the tests as `MOBILE_TEST_USERS_FILE` and picks the profile with its `TEST_USER` parameter (`MOBILE_TEST_USER`). In the tests, `secret("MOBILE_SECRET_PASSWORD")`, which recorded password fields turn into, reads the profile's `password` (the name without `MOBILE_SECRET_`, in lower case); `user_value("username")` reads any other field; `profile()` the whole map. An environment variable named like the secret (`MOBILE_SECRET_PASSWORD`) still wins, so one value can be passed without a file. The values never pass through the assistant: it knows only the field names a segment needs.
+The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` unless a build names another in `TEST_USER_CREDENTIALS_ID` (a second file for another environment, say); the job hands it to the tests as `MOBILE_TEST_USERS_FILE`, and a build signs in with the `default` profile. In the tests, `secret("MOBILE_SECRET_PASSWORD")`, which recorded password fields turn into, reads the profile's `password` (the name without `MOBILE_SECRET_`, in lower case); `user_value("username")` reads any other field, `user_value("username", "vip")` another profile's; `profile()` the whole map. An environment variable named like the secret (`MOBILE_SECRET_PASSWORD`) still wins, so one value can be passed without a file, and `MOBILE_TEST_USER` picks another profile on a laptop. The values never pass through the assistant: it knows only the field names a segment needs.
 
 ## The Jenkins job
 
@@ -81,12 +81,11 @@ The team keeps it in Jenkins as a *Secret file* credential (`mobile-test-users`)
    | `MOBILE_LOCAL_BINARY_URL` | Where the BrowserStackLocal binary is downloaded from; a copy in your artifact repository works; empty uses a `BrowserStackLocal` already on the agent's `PATH` | browserstack.com |
    | `MOBILE_LOCAL_PROXY` | `http://host:port` the tunnel goes out through | the agent's `HTTPS_PROXY` |
    | `MOBILE_BROWSERSTACK_CREDENTIALS_ID` | The *Username with password* credential with the BrowserStack account | `browserstack` |
-   | `MOBILE_TEST_USERS_CREDENTIALS_ID` | The *Secret file* credential with the test users file | `mobile-test-users` |
 3. Credentials:
    - `browserstack`: *Username with password*, holding the BrowserStack username and access key the runs use (another id: `MOBILE_BROWSERSTACK_CREDENTIALS_ID`).
-   - `mobile-test-users`: *Secret file*, the test users JSON file described under "Test users" (another id: `MOBILE_TEST_USERS_CREDENTIALS_ID`). Whoever manages the test accounts uploads a new version of the file when they change; `config/<KEY>.<platform>.yaml` lists under `secrets` the fields its tests need.
+   - `mobile-test-users`: *Secret file*, the test users JSON file described under "Test users" (a build can name another file in `TEST_USER_CREDENTIALS_ID`). Whoever manages the test accounts uploads a new version of the file when they change; `config/<KEY>.<platform>.yaml` lists under `secrets` the fields its tests need.
 4. Install the **Cucumber Reports** plugin to see each run's report on the build page; without it the build still archives `cucumber.json` and publishes the JUnit results.
-5. Apps on a private network: leave `LOCAL` on. The job downloads the BrowserStackLocal binary (`MOBILE_LOCAL_BINARY_URL`) and starts one tunnel per build, named after the run, through `MOBILE_LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions of the configs whose `network` is private attach to it. The agent must reach the app's servers. For apps on the public internet set `LOCAL` to false.
+5. The apps live on the private network, so every build starts a BrowserStack Local tunnel: the job downloads the BrowserStackLocal binary (`MOBILE_LOCAL_BINARY_URL`) and starts one tunnel per build, named after the run, through `MOBILE_LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions of the configs whose `network` is private attach to it. The agent must reach the app's servers.
 6. Run the job once by hand with the parameters filled in; Jenkins only picks up a pipeline's parameters after its first run.
 7. Tell the assistant the job path and this repository once. The `generate-mobile-scripts` skill asks for them and keeps them in the scenario plan, together with the credentials ids of the test secrets.
 
@@ -99,10 +98,9 @@ The team keeps it in Jenkins as a *Secret file* credential (`mobile-test-users`)
 | `TAGS` | behave tag expressions a scenario must match, for example `@FX-12` (the issue's tag); empty runs everything |
 | `SCENARIOS` | Optional: only these scenarios: `<scenario id>` runs every Examples row of the scenario, `<scenario id>#<example>` one row, each optionally prefixed `<platform>/`; a dry run or a rerun |
 | `ANDROID_APP_ID`, `IOS_APP_ID` | Optional: a build already on BrowserStack (`bs://...` or its custom id) to test instead of the one `config/<KEY>.<platform>.yaml` names |
-| `TEST_USER` | The profile of the test users file the tests sign in with (`default`) |
+| `TEST_USER_CREDENTIALS_ID` | The *Secret file* credential holding the test users file (`mobile-test-users`) |
 | `PARALLEL` | Sessions at a time; the runner waits for free parallel sessions when others use the account |
 | `COLLECT_VIDEO` | Download each session's video into the evidence (default on) |
-| `LOCAL` | Start a BrowserStack Local tunnel for the run (default on) |
 
 Results land in `runs/build-<build number>/`, and the BrowserStack build and the Local tunnel take that name too.
 
@@ -117,6 +115,6 @@ Failed scenarios make the build UNSTABLE; a build that could not run anything (n
 ## How the assistant uses the pipeline
 
 1. It pushes the issue's files to the branch `efp/<KEY>` and opens a pull request into the base branch once the dry run is approved.
-2. It starts the job with `jenkins job build-with-params`: `BRANCH_NAME`, `PLATFORMS`, `TAGS` (the issue key), `TEST_USER` from the plan, and `SCENARIOS` for a dry run or a rerun.
+2. It starts the job with `jenkins job build-with-params`: `BRANCH_NAME`, `PLATFORMS`, `TAGS` (the issue key), `TEST_USER_CREDENTIALS_ID` from the plan, and `SCENARIOS` for a dry run or a rerun.
 3. It follows the console log's `EFP-MATRIX` lines into `mobile/runs/<task id>/matrix.json` in its workspace, which the Portal task page shows live.
 4. At the end it downloads `evidence.tar.gz` and the videos it needs from `runs/build-<build number>/` into `mobile/runs/<task id>/`. The layout is the same as on the agent, so every relative path in the evidence resolves.

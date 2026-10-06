@@ -6,10 +6,10 @@ fields the app asks for::
     {"default": {"username": "uat-fx-01", "password": "...", "pin": "1234"},
      "vip": {"username": "uat-fx-vip", "password": "..."}}
 
-The Jenkins job hands it to the tests as MOBILE_TEST_USERS_FILE (a Secret
-file credential) and names the profile a build signs in with in
-MOBILE_TEST_USER (the TEST_USER parameter, ``default`` unless set). On a
-laptop, export both before running behave.
+The Jenkins job hands it to the tests as MOBILE_TEST_USERS_FILE (the Secret
+file credential its TEST_USER_CREDENTIALS_ID parameter names); a build signs
+in with the ``default`` profile. On a laptop, export MOBILE_TEST_USERS_FILE
+before running behave, and MOBILE_TEST_USER to sign in with another profile.
 
 ``secret("MOBILE_SECRET_PASSWORD")`` is what recorded password fields turn
 into: the chosen profile's ``password`` (the name without ``MOBILE_SECRET_``,

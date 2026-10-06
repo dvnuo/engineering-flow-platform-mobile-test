@@ -26,10 +26,13 @@
 //   MOBILE_LOCAL_PROXY                 http://host:port the tunnel goes out through (default: the agent's HTTPS_PROXY)
 //   MOBILE_BROWSERSTACK_CREDENTIALS_ID the Username with password credential holding the BrowserStack
 //                                      username and access key (default browserstack)
-//   MOBILE_TEST_USERS_CREDENTIALS_ID   the Secret file credential holding the test users file (default
-//                                      mobile-test-users): a JSON map of profiles, "default" and any
-//                                      others, each with username, password, and whatever else the app
-//                                      asks for; TEST_USER picks the profile a build signs in with
+//
+// The test accounts come from a Secret file credential named by the build
+// (TEST_USER_CREDENTIALS_ID, default mobile-test-users): a JSON map of
+// profiles, "default" and any others, each with username, password, and
+// whatever else the app asks for. A build signs in with the "default" profile.
+// Every build starts a BrowserStack Local tunnel: the apps live on the
+// private network.
 
 pipeline {
   agent { label "${env.MOBILE_AGENT_LABEL ?: 'linux'}" }
@@ -47,10 +50,9 @@ pipeline {
     string(name: 'SCENARIOS', defaultValue: '', description: 'Optional: only these scenarios, space-separated: <scenario id> runs every Examples row of the scenario, <scenario id>#<example> one row, each optionally prefixed <platform>/ (a dry run or a rerun); empty runs everything the tags select')
     string(name: 'ANDROID_APP_ID', defaultValue: '', description: 'Optional: the Android build on BrowserStack to test, already uploaded (bs://... or its custom id); empty uses the app named in config/<KEY>.android.yaml')
     string(name: 'IOS_APP_ID', defaultValue: '', description: 'Optional: the iOS build on BrowserStack to test, already uploaded (bs://... or its custom id); empty uses the app named in config/<KEY>.ios.yaml')
-    string(name: 'TEST_USER', defaultValue: 'default', description: 'The profile of the test users file the tests sign in with')
+    string(name: 'TEST_USER_CREDENTIALS_ID', defaultValue: 'mobile-test-users', description: 'The Secret file credential holding the test users file: a JSON map of profiles ("default" and any others), each with username, password, and whatever else the app asks for')
     string(name: 'PARALLEL', defaultValue: '4', description: 'Parallel BrowserStack sessions; the run waits for free ones')
     booleanParam(name: 'COLLECT_VIDEO', defaultValue: true, description: 'Download each session video into the evidence')
-    booleanParam(name: 'LOCAL', defaultValue: true, description: 'Start a BrowserStack Local tunnel on this agent for the run, for apps that talk to servers on the private network (the configs whose network is private use it)')
   }
 
   stages {
@@ -59,10 +61,9 @@ pipeline {
         script {
           env.RUN_LABEL = "build-${env.BUILD_NUMBER}"
           if (!(params.PARALLEL ==~ /[1-9][0-9]?/)) { error 'PARALLEL must be a number from 1 to 99' }
-          if (!(params.TEST_USER?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9._-]{0,63}/)) { error 'TEST_USER must be a profile name: letters, digits, dot, dash, or underscore' }
+          if (!params.TEST_USER_CREDENTIALS_ID?.trim()) { error 'TEST_USER_CREDENTIALS_ID must name the Secret file credential holding the test users file' }
           env.PLATFORM_LIST = params.PLATFORMS == 'all' ? 'android ios' : params.PLATFORMS
-          env.MOBILE_TEST_USER = params.TEST_USER.trim()
-          currentBuild.description = "${params.BRANCH_NAME ?: 'job branch'} ${params.PLATFORMS} ${params.TAGS} ${params.SCENARIOS} user=${env.MOBILE_TEST_USER}".trim()
+          currentBuild.description = "${params.BRANCH_NAME ?: 'job branch'} ${params.PLATFORMS} ${params.TAGS} ${params.SCENARIOS}".trim()
         }
       }
     }
@@ -100,11 +101,11 @@ pipeline {
     }
 
     stage('BrowserStack Local') {
-      when { expression { return params.LOCAL } }
       steps {
         script {
           // One tunnel per build, named after the run; the sessions of the
           // configs on a private network attach to it by that identifier.
+          // The apps live on the private network, so every build has one.
           withCredentials([usernamePassword(credentialsId: env.MOBILE_BROWSERSTACK_CREDENTIALS_ID ?: 'browserstack', usernameVariable: 'BROWSERSTACK_USERNAME', passwordVariable: 'BROWSERSTACK_ACCESS_KEY')]) {
             sh '''#!/bin/bash
               set -euo pipefail
@@ -139,14 +140,14 @@ pipeline {
           // and removed with the build.
           def bindings = [
             usernamePassword(credentialsId: env.MOBILE_BROWSERSTACK_CREDENTIALS_ID ?: 'browserstack', usernameVariable: 'BROWSERSTACK_USERNAME', passwordVariable: 'BROWSERSTACK_ACCESS_KEY'),
-            file(credentialsId: env.MOBILE_TEST_USERS_CREDENTIALS_ID ?: 'mobile-test-users', variable: 'MOBILE_TEST_USERS_FILE'),
+            file(credentialsId: params.TEST_USER_CREDENTIALS_ID.trim(), variable: 'MOBILE_TEST_USERS_FILE'),
           ]
           def rc = 0
           withCredentials(bindings) {
             rc = sh(returnStatus: true, script: '''#!/bin/bash
               set -uo pipefail
               rm -rf "runs/${RUN_LABEL}"
-              if [ "${LOCAL}" = "true" ]; then export BROWSERSTACK_LOCAL_IDENTIFIER="${RUN_LABEL}"; fi
+              export BROWSERSTACK_LOCAL_IDENTIFIER="${RUN_LABEL}"
               args=(-m mobiletest.run --label "${RUN_LABEL}" --out "runs/${RUN_LABEL}" --parallel "${PARALLEL}" --wait-capacity)
               for platform in ${PLATFORM_LIST}; do args+=(--platform "${platform}"); done
               for tag in ${TAGS}; do args+=(--tags "${tag}"); done
@@ -176,10 +177,8 @@ pipeline {
         if [ -d "$out" ]; then
           tar czf "$out/evidence.tar.gz" --exclude='*.mp4' --exclude='evidence.tar.gz' --exclude='behave' -C "$out" .
         fi
-        if [ "${LOCAL}" = "true" ]; then
-          bin=.efp-bin/BrowserStackLocal; [ -x "$bin" ] || bin="$(command -v BrowserStackLocal || true)"
-          [ -n "$bin" ] && "$bin" --local-identifier "${RUN_LABEL}" --daemon stop > /dev/null 2>&1 || true
-        fi
+        bin=.efp-bin/BrowserStackLocal; [ -x "$bin" ] || bin="$(command -v BrowserStackLocal || true)"
+        [ -n "$bin" ] && "$bin" --local-identifier "${RUN_LABEL}" --daemon stop > /dev/null 2>&1 || true
       '''
       script {
         try {
