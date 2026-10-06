@@ -51,18 +51,26 @@ The runner starts one `behave` process per scenario row, prints the matrix as `E
 ## The Jenkins job
 
 1. Create a **Pipeline** job, for example `mobile/mobile-scenarios`, with *Pipeline script from SCM* pointing at this repository and `Jenkinsfile` as the script path. The job's SCM credentials are reused to check out the branch a build asks for.
-2. Give it an agent, labelled `linux` by default, with Python 3.9+ (`PYTHON` names the interpreter), `bash`, `curl`, and `tar`, that reaches:
+2. Give it an agent, labelled `linux` unless `MOBILE_AGENT_LABEL` says otherwise, with Python 3.9+, `bash`, `curl`, and `tar`, that reaches:
    - `hub-cloud.browserstack.com` and `api-cloud.browserstack.com` on port 443;
-   - a PyPI index for the requirements (`PIP_INDEX_URL` for an internal Nexus proxy);
+   - a PyPI index for the requirements;
    - wherever app builds are downloaded from.
 
-   Set `HTTPS_PROXY` on the agent if it needs a proxy.
+   Set `HTTPS_PROXY` on the agent if it needs a proxy. The job's own settings are environment variables, set once on the agent (its node properties) or under *Manage Jenkins > System > Global properties*, never build parameters:
+
+   | Variable | Meaning | Default |
+   | --- | --- | --- |
+   | `MOBILE_AGENT_LABEL` | The agent label the job runs on | `linux` |
+   | `MOBILE_PYTHON` | The Python 3.9+ interpreter on the agent | `python3` |
+   | `MOBILE_PIP_INDEX_URL` | A PyPI index for the requirements, such as an internal Nexus proxy | pip's default |
+   | `MOBILE_LOCAL_BINARY_URL` | Where the BrowserStackLocal binary is downloaded from; a copy in your artifact repository works; empty uses a `BrowserStackLocal` already on the agent's `PATH` | browserstack.com |
+   | `MOBILE_LOCAL_PROXY` | `http://host:port` the tunnel goes out through | the agent's `HTTPS_PROXY` |
 3. Credentials:
    - `browserstack`: *Username with password*, holding the BrowserStack username and access key the runs use. Another id can be passed in `BROWSERSTACK_CREDENTIALS_ID`.
    - One *Secret text* per test account password the tests read with `secret("NAME")`. Recorded password fields name them, for example `MOBILE_SECRET_PASSWORD`; each `config/<KEY>.<platform>.yaml` lists the names its tests need. Builds pass them as `TEST_SECRETS=MOBILE_SECRET_PASSWORD=fx-uat-password,MOBILE_SECRET_PIN=fx-uat-pin`, each name mapped to its credentials id.
    - `APP_CREDENTIALS_ID` when builds come from Nexus or Jenkins behind a login.
 4. Install the **Cucumber Reports** plugin to see each run's report on the build page; without it the build still archives `cucumber.json` and publishes the JUnit results.
-5. Apps on a private network: leave `LOCAL` on. The job downloads the BrowserStackLocal binary (`LOCAL_BINARY_URL`, a copy in your artifact repository works) and starts one tunnel per build, named after the run, through `LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions of the configs whose `network` is private attach to it. The agent must reach the app's servers. For apps on the public internet set `LOCAL` to false.
+5. Apps on a private network: leave `LOCAL` on. The job downloads the BrowserStackLocal binary (`MOBILE_LOCAL_BINARY_URL`) and starts one tunnel per build, named after the run, through `MOBILE_LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions of the configs whose `network` is private attach to it. The agent must reach the app's servers. For apps on the public internet set `LOCAL` to false.
 6. Run the job once by hand with the parameters filled in; Jenkins only picks up a pipeline's parameters after its first run.
 7. Tell the assistant the job path and this repository once. The `generate-mobile-scripts` skill asks for them and keeps them in the scenario plan, together with the credentials ids of the test secrets.
 
@@ -70,17 +78,16 @@ The runner starts one `behave` process per scenario row, prints the matrix as `E
 
 | Parameter | Meaning |
 | --- | --- |
-| `SCRIPTS_REF` | Branch, tag, or commit of this repository to run; empty runs the job's configured branch |
-| `PLATFORMS` | `android`, `ios`, or both |
-| `TAGS` | behave tag expressions a scenario must match, for example `@FX-12`; empty runs everything |
-| `ROWS`, `CASE`, `EXAMPLE` | Narrow a build to rows (`<scenario id>#<example>`), one scenario, or one Examples row: a dry run or a rerun |
-| `RUN_LABEL` | Run id; results land in `runs/<RUN_LABEL>/` and the BrowserStack build takes the same name |
+| `BRANCH_NAME` | Branch, tag, or commit of this repository to run (the assistant pushes `efp/<KEY>`); empty runs the job's configured branch |
+| `PLATFORMS` | `all`, `android`, or `ios` |
+| `TAGS` | behave tag expressions a scenario must match, for example `@FX-12` (the issue's tag); empty runs everything |
+| `ROWS` | Narrow a build: `<scenario id>` runs every Examples row of that scenario, `<scenario id>#<example>` one row, each optionally prefixed `<platform>/`; a dry run or a rerun |
+| `RUN_LABEL` | Run id; results land in `runs/<RUN_LABEL>/` and the BrowserStack build takes the same name; the assistant passes its Portal task id; empty uses `build-<build number>` |
 | `PARALLEL` | Sessions at a time; the runner waits for free parallel sessions when others use the account |
 | `COLLECT_VIDEO` | Download each session's video into the evidence (default on) |
-| `APP_FILE_URL`, `APP_CUSTOM_ID`, `APP_CREDENTIALS_ID` | Optional build to upload first; give every build of an app the same custom id |
+| `APP_FILE_URL`, `APP_CUSTOM_ID`, `APP_CREDENTIALS_ID` | Optional: a build to upload to BrowserStack first, the custom id it is stored under (one per app, the id the config files name, so they run the newest upload), and the login for fetching it |
 | `BROWSERSTACK_CREDENTIALS_ID`, `TEST_SECRETS` | Credentials, as above |
-| `LOCAL`, `LOCAL_BINARY_URL`, `LOCAL_PROXY` | A BrowserStack Local tunnel for the run (default on), where its binary comes from, and the proxy it goes out through |
-| `PIP_INDEX_URL`, `PYTHON`, `AGENT_LABEL` | The agent's Python and package index |
+| `LOCAL` | Start a BrowserStack Local tunnel for the run (default on) |
 
 ### What a build publishes
 
@@ -93,6 +100,6 @@ Failed scenarios make the build UNSTABLE; a build that could not run anything (n
 ## How the assistant uses the pipeline
 
 1. It pushes the issue's files to the branch `efp/<KEY>` and opens a pull request into the base branch once the dry run is approved.
-2. It starts the job with `jenkins job build-with-params`: `SCRIPTS_REF`, `PLATFORMS`, `TAGS` (the issue key), `RUN_LABEL` (the Portal task id), `TEST_SECRETS`, and `ROWS` for a rerun.
+2. It starts the job with `jenkins job build-with-params`: `BRANCH_NAME`, `PLATFORMS`, `TAGS` (the issue key), `RUN_LABEL` (the Portal task id), `TEST_SECRETS`, and `ROWS` for a dry run or a rerun.
 3. It follows the console log's `EFP-MATRIX` lines into `mobile/runs/<task id>/matrix.json` in its workspace, which the Portal task page shows live.
 4. At the end it downloads `evidence.tar.gz` and the videos it needs into `mobile/runs/<RUN_LABEL>/`. The layout is the same as on the agent, so every relative path in the evidence resolves.

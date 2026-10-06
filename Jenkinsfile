@@ -13,9 +13,20 @@
 // the rows to run. Results go to runs/<RUN_LABEL>/. While the run goes, the
 // matrix is printed on one line prefixed EFP-MATRIX whenever it changes, so
 // the assistant can follow it from the console log.
+//
+// What a team sets once, as environment variables on the agent or under
+// Manage Jenkins > System > Global properties (none of these is a build
+// parameter):
+//   MOBILE_AGENT_LABEL       the agent label (default linux); the agent needs egress to BrowserStack
+//   MOBILE_PYTHON            the Python 3.9+ interpreter on the agent (default python3)
+//   MOBILE_PIP_INDEX_URL     a PyPI index for the requirements, such as an internal Nexus proxy
+//   MOBILE_LOCAL_BINARY_URL  where the BrowserStackLocal binary is downloaded from (default
+//                            browserstack.com; a copy in your artifact repository works; set it
+//                            empty to use a BrowserStackLocal already on the agent's PATH)
+//   MOBILE_LOCAL_PROXY       http://host:port the tunnel goes out through (default: the agent's HTTPS_PROXY)
 
 pipeline {
-  agent { label "${params.AGENT_LABEL ?: 'linux'}" }
+  agent { label "${env.MOBILE_AGENT_LABEL ?: 'linux'}" }
 
   options {
     skipDefaultCheckout(true)
@@ -24,38 +35,30 @@ pipeline {
   }
 
   parameters {
-    string(name: 'SCRIPTS_REF', defaultValue: '', description: 'Branch, tag, or commit of this repository to run; empty runs the branch the job is configured with')
-    string(name: 'PLATFORMS', defaultValue: 'android ios', description: 'Space-separated platforms: android, ios')
+    string(name: 'BRANCH_NAME', defaultValue: '', description: 'Branch, tag, or commit of this repository to run (the assistant pushes efp/<KEY>); empty runs the branch the job is configured with')
+    choice(name: 'PLATFORMS', choices: ['all', 'android', 'ios'], description: 'The platforms to run')
     string(name: 'TAGS', defaultValue: '', description: 'Space-separated behave tag expressions, all of which a scenario must match, for example @FX-12 or @FX-12 @positive; empty runs every scenario')
-    string(name: 'ROWS', defaultValue: '', description: 'Optional: only these rows, space-separated <scenario id>#<example> (or <platform>/<scenario id>#<example>), for a rerun')
-    string(name: 'CASE', defaultValue: '', description: 'Optional: only this scenario id')
-    string(name: 'EXAMPLE', defaultValue: '', description: 'Optional: only this Examples row name')
-    string(name: 'RUN_LABEL', defaultValue: '', description: 'Run id: the Portal task id, or chat-<time>. Results go to runs/<RUN_LABEL>/')
+    string(name: 'ROWS', defaultValue: '', description: 'Optional: only these scenarios or rows, space-separated: <scenario id> runs all its Examples rows, <scenario id>#<example> one row, each optionally prefixed <platform>/ (a dry run or a rerun)')
+    string(name: 'RUN_LABEL', defaultValue: '', description: 'Run id: results go to runs/<RUN_LABEL>/ and the BrowserStack build takes the name; the assistant passes its Portal task id; empty uses build-<build number>')
     string(name: 'PARALLEL', defaultValue: '4', description: 'Parallel BrowserStack sessions; the run waits for free ones')
     booleanParam(name: 'COLLECT_VIDEO', defaultValue: true, description: 'Download each session video into the evidence')
-    string(name: 'APP_FILE_URL', defaultValue: '', description: 'Optional: build to upload to BrowserStack first (.apk, .aab, .ipa), fetched by this agent')
-    string(name: 'APP_CUSTOM_ID', defaultValue: '', description: 'Custom id for that build; the config files that name it get the newest upload')
-    string(name: 'APP_CREDENTIALS_ID', defaultValue: '', description: 'Optional: username/password credentials for APP_FILE_URL (Nexus, Jenkins)')
+    string(name: 'APP_FILE_URL', defaultValue: '', description: 'Optional: a build to upload to BrowserStack first (.apk, .aab, .ipa), fetched by this agent; the config files then run the newest upload of its custom id')
+    string(name: 'APP_CUSTOM_ID', defaultValue: '', description: 'The custom id that upload is stored under (every build of an app shares one, for example fxapp-uat-android, which is what config/<KEY>.<platform>.yaml names)')
+    string(name: 'APP_CREDENTIALS_ID', defaultValue: '', description: 'Optional: username/password credentials for fetching APP_FILE_URL (Nexus, Jenkins behind a login)')
     string(name: 'BROWSERSTACK_CREDENTIALS_ID', defaultValue: 'browserstack', description: 'Username/password credentials: BrowserStack username and access key')
     string(name: 'TEST_SECRETS', defaultValue: '', description: 'Comma-separated NAME=credentialsId pairs: secret-text credentials exposed under the names the tests read with secret(), for example MOBILE_SECRET_PASSWORD=fx-uat-password')
     booleanParam(name: 'LOCAL', defaultValue: true, description: 'Start a BrowserStack Local tunnel on this agent for the run, for apps that talk to servers on the private network (the configs whose network is private use it)')
-    string(name: 'LOCAL_BINARY_URL', defaultValue: 'https://www.browserstack.com/browserstack-local/BrowserStackLocal-linux-x64.zip', description: 'Where to download the BrowserStackLocal binary (a copy in your artifact repository works); empty uses BrowserStackLocal on PATH')
-    string(name: 'LOCAL_PROXY', defaultValue: '', description: 'Optional: http://host:port the tunnel goes out through; empty uses HTTPS_PROXY of the agent')
-    string(name: 'PIP_INDEX_URL', defaultValue: '', description: 'Optional: a PyPI index (an internal Nexus proxy) for the requirements')
-    string(name: 'PYTHON', defaultValue: 'python3', description: 'The Python 3.9+ interpreter on the agent')
-    string(name: 'AGENT_LABEL', defaultValue: 'linux', description: 'Agent label; the agent needs egress to BrowserStack')
   }
 
   stages {
     stage('Check parameters') {
       steps {
         script {
-          if (!(params.RUN_LABEL ==~ /[A-Za-z0-9][A-Za-z0-9._-]{0,99}/)) { error 'RUN_LABEL must be letters, digits, dot, dash, or underscore' }
+          env.RUN_LABEL = params.RUN_LABEL?.trim() ?: "build-${env.BUILD_NUMBER}"
+          if (!(env.RUN_LABEL ==~ /[A-Za-z0-9][A-Za-z0-9._-]{0,99}/)) { error 'RUN_LABEL must be letters, digits, dot, dash, or underscore' }
           if (!(params.PARALLEL ==~ /[1-9][0-9]?/)) { error 'PARALLEL must be a number from 1 to 99' }
-          for (String platform : params.PLATFORMS.trim().split(/\s+/)) {
-            if (!(platform in ['android', 'ios'])) { error "PLATFORMS entries are android or ios: ${platform}" }
-          }
-          currentBuild.description = "${params.RUN_LABEL}: ${params.SCRIPTS_REF ?: 'job branch'} ${params.PLATFORMS} ${params.TAGS} ${params.ROWS}".trim()
+          env.PLATFORM_LIST = params.PLATFORMS == 'all' ? 'android ios' : params.PLATFORMS
+          currentBuild.description = "${env.RUN_LABEL}: ${params.BRANCH_NAME ?: 'job branch'} ${params.PLATFORMS} ${params.TAGS} ${params.ROWS}".trim()
         }
       }
     }
@@ -64,8 +67,8 @@ pipeline {
       steps {
         script {
           // The job's own SCM settings (this repository and its credentials)
-          // are reused; SCRIPTS_REF picks the branch the assistant pushed.
-          def ref = params.SCRIPTS_REF?.trim()
+          // are reused; BRANCH_NAME picks the branch the assistant pushed.
+          def ref = params.BRANCH_NAME?.trim()
           if (ref) {
             checkout([$class: 'GitSCM',
               branches: [[name: ref]],
@@ -82,9 +85,10 @@ pipeline {
       steps {
         sh '''#!/bin/bash
           set -euo pipefail
-          "${PYTHON}" -m venv .venv
+          python="${MOBILE_PYTHON:-python3}"
+          "$python" -m venv .venv
           index=()
-          if [ -n "${PIP_INDEX_URL}" ]; then index=(--index-url "${PIP_INDEX_URL}"); fi
+          if [ -n "${MOBILE_PIP_INDEX_URL:-}" ]; then index=(--index-url "${MOBILE_PIP_INDEX_URL}"); fi
           .venv/bin/python -m pip install --quiet "${index[@]}" -r requirements.txt
           .venv/bin/python -m behave --version
         '''
@@ -128,21 +132,22 @@ pipeline {
           withCredentials([usernamePassword(credentialsId: params.BROWSERSTACK_CREDENTIALS_ID, usernameVariable: 'BROWSERSTACK_USERNAME', passwordVariable: 'BROWSERSTACK_ACCESS_KEY')]) {
             sh '''#!/bin/bash
               set -euo pipefail
-              mkdir -p .efp-bin
-              if [ -n "${LOCAL_BINARY_URL}" ]; then
-                curl -fsSL -o .efp-bin/BrowserStackLocal.zip "${LOCAL_BINARY_URL}"
+              mkdir -p .efp-bin runs
+              url="${MOBILE_LOCAL_BINARY_URL-https://www.browserstack.com/browserstack-local/BrowserStackLocal-linux-x64.zip}"
+              if [ -n "$url" ]; then
+                curl -fsSL -o .efp-bin/BrowserStackLocal.zip "$url"
                 (cd .efp-bin && unzip -o -q BrowserStackLocal.zip && chmod +x BrowserStackLocal)
                 bin=.efp-bin/BrowserStackLocal
               else
                 bin="$(command -v BrowserStackLocal)"
               fi
               args=(--key "${BROWSERSTACK_ACCESS_KEY}" --local-identifier "${RUN_LABEL}" --force-local --daemon start)
-              proxy="${LOCAL_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
+              proxy="${MOBILE_LOCAL_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
               if [ -n "$proxy" ]; then
                 hostport="${proxy#*://}"; hostport="${hostport%%/*}"; hostport="${hostport##*@}"
                 args+=(--proxy-host "${hostport%%:*}" --proxy-port "${hostport##*:}" --force-proxy)
               fi
-              "$bin" "${args[@]}" > "runs/${RUN_LABEL}.local.log" 2>&1 || { cat "runs/${RUN_LABEL}.local.log" | sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g"; exit 1; }
+              "$bin" "${args[@]}" > "runs/${RUN_LABEL}.local.log" 2>&1 || { sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g" "runs/${RUN_LABEL}.local.log"; exit 1; }
               sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g" "runs/${RUN_LABEL}.local.log"
             '''
           }
@@ -171,17 +176,15 @@ pipeline {
               rm -rf "runs/${RUN_LABEL}"
               if [ "${LOCAL}" = "true" ]; then export BROWSERSTACK_LOCAL_IDENTIFIER="${RUN_LABEL}"; fi
               args=(-m mobiletest.run --label "${RUN_LABEL}" --out "runs/${RUN_LABEL}" --parallel "${PARALLEL}" --wait-capacity)
-              for platform in ${PLATFORMS}; do args+=(--platform "${platform}"); done
+              for platform in ${PLATFORM_LIST}; do args+=(--platform "${platform}"); done
               for tag in ${TAGS}; do args+=(--tags "${tag}"); done
               for row in ${ROWS}; do args+=(--row "${row}"); done
-              if [ -n "${CASE}" ]; then args+=(--case "${CASE}"); fi
-              if [ -n "${EXAMPLE}" ]; then args+=(--example "${EXAMPLE}"); fi
               if [ "${COLLECT_VIDEO}" = "true" ]; then args+=(--collect-video); fi
               .venv/bin/python "${args[@]}"
             ''')
           }
           if (rc == 2) {
-            error 'No scenario row matched PLATFORMS, TAGS, ROWS, CASE, and EXAMPLE'
+            error 'No scenario row matched PLATFORMS, TAGS, and ROWS'
           }
           if (rc != 0) {
             // Failed scenarios make the build unstable; the evidence and the
@@ -210,15 +213,15 @@ pipeline {
         try {
           cucumber buildStatus: 'UNSTABLE',
             fileIncludePattern: 'cucumber.json',
-            jsonReportDirectory: "runs/${params.RUN_LABEL}/cucumber",
+            jsonReportDirectory: "runs/${env.RUN_LABEL}/cucumber",
             reportTitle: 'Mobile scenarios',
             trendsLimit: 20
         } catch (Exception e) {
           echo "Cucumber report not published (is the Cucumber Reports plugin installed?): ${e}"
         }
       }
-      junit allowEmptyResults: true, testResults: "runs/${params.RUN_LABEL}/junit/**/*.xml"
-      archiveArtifacts allowEmptyArchive: true, artifacts: "runs/${params.RUN_LABEL}/matrix.json, runs/${params.RUN_LABEL}/report.json, runs/${params.RUN_LABEL}/evidence.tar.gz, runs/${params.RUN_LABEL}/cucumber/cucumber.json, runs/${params.RUN_LABEL}/cases/**/video.mp4"
+      junit allowEmptyResults: true, testResults: "runs/${env.RUN_LABEL}/junit/**/*.xml"
+      archiveArtifacts allowEmptyArchive: true, artifacts: "runs/${env.RUN_LABEL}/matrix.json, runs/${env.RUN_LABEL}/report.json, runs/${env.RUN_LABEL}/evidence.tar.gz, runs/${env.RUN_LABEL}/cucumber/cucumber.json, runs/${env.RUN_LABEL}/cases/**/video.mp4"
     }
   }
 }

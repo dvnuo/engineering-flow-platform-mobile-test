@@ -190,6 +190,13 @@ def _evidence(out, row):
         return {}, path
 
 
+def row_wanted(row, wanted):
+    """Whether a --row entry names this row: the row id with or without its
+    platform, or the scenario id alone (every row of that scenario)."""
+    without_platform = row.id.split("/", 1)[1]
+    return any(key in wanted for key in (row.id, without_platform, f"{row.platform}/{row.case_id}", row.case_id))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="python -m mobiletest.run", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--features", nargs="*", help="feature directories; default: every features/<platform>/<KEY>")
@@ -198,7 +205,7 @@ def main(argv=None):
     parser.add_argument("--case", help="only this scenario id")
     parser.add_argument("--example", help="only this Examples row")
     parser.add_argument("--name", help="only rows whose name matches this regex")
-    parser.add_argument("--row", action="append", default=[], help="only this row: <scenario id>#<example>, or <platform>/<scenario id>#<example>; repeatable")
+    parser.add_argument("--row", action="append", default=[], help="only this row: <scenario id>#<example>, or <scenario id> for all its rows, each optionally prefixed <platform>/; repeatable")
     parser.add_argument("--parallel", type=int, default=1)
     parser.add_argument("--label", help="run id; default local-<time>")
     parser.add_argument("--out", help="output directory; default runs/<label>")
@@ -221,7 +228,7 @@ def main(argv=None):
         rows = [r for r in rows if pattern.search(r.name)]
     if args.row:
         wanted = {w.strip() for w in args.row if w.strip()}
-        rows = [r for r in rows if r.id in wanted or r.id.split("/", 1)[1] in wanted]
+        rows = [r for r in rows if row_wanted(r, wanted)]
     if args.list:
         print(json.dumps([{"id": r.id, "name": r.name, "feature": r.feature_file.relative_to(REPO_ROOT).as_posix(), "tags": r.tags} for r in rows], indent=2))
         return 0
