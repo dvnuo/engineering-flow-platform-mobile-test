@@ -43,13 +43,13 @@ from mobiletest.checks import (
 )
 from mobiletest.elements import ElementNotFound, by_name, by_role, by_text, find, optional
 from mobiletest.evidence import screenshot
-from mobiletest.secrets import MissingSecret, secret
+from mobiletest.secrets import MissingSecret, profile, secret, user_value
 
 __all__ = [
     "ElementNotFound", "MissingSecret",
     "accept_permission", "activate_app", "assert_count", "assert_enabled", "assert_not_visible", "assert_selected",
     "assert_text", "assert_visible", "back", "by_name", "by_role", "by_text", "clear", "close_app", "deny_permission",
     "double_tap", "find", "hide_keyboard", "launch_app", "long_press", "open_deep_link", "optional", "press_enter",
-    "press_keycode", "reset_app", "screenshot", "scroll_to", "secret", "swipe", "tap", "tap_point", "terminate_app",
+    "press_keycode", "reset_app", "screenshot", "scroll_to", "secret", "profile", "user_value", "swipe", "tap", "tap_point", "terminate_app",
     "type_text", "visible", "wait_enabled", "wait_gone", "wait_stable", "wait_text", "wait_visible",
 ]

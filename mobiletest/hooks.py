@@ -46,6 +46,11 @@ def load_config(platform, key):
     cfg.setdefault("issue", key)
     cfg.setdefault("data", {})
     cfg.setdefault("scenarios", {})
+    # A build already on BrowserStack named by the job (ANDROID_APP_ID,
+    # IOS_APP_ID: a bs:// id or a custom id) replaces the config's app.
+    override = os.environ.get(f"{platform.upper()}_APP_ID", "").strip()
+    if override:
+        cfg["app"] = override
     return cfg
 
 
