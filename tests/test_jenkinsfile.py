@@ -20,17 +20,25 @@ OPTIONAL = ["TAGS", "SCENARIOS", "ANDROID_APP_ID", "IOS_APP_ID", "MOBILE_PYTHON"
 
 
 def block(text, opener):
-    """The text of the first `opener {` block, braces balanced."""
-    start = text.index(opener)
+    """The text of the first `opener {` block, braces balanced; the braces
+    inside the shell scripts (the '''...''' strings) do not count."""
+    masked = re.sub(r"'''.*?'''", lambda m: " " * len(m.group(0)), text, flags=re.S)
+    start = masked.index(opener)
     depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
+    for i in range(start, len(masked)):
+        if masked[i] == "{":
             depth += 1
-        elif text[i] == "}":
+        elif masked[i] == "}":
             depth -= 1
             if depth == 0:
                 return text[start : i + 1]
     raise AssertionError(f"unbalanced block {opener!r}")
+
+
+def test_the_pipeline_block_is_balanced():
+    # The whole declarative pipeline is one balanced block (a stray brace in
+    # a shell script does not count, a missing Groovy one does).
+    assert block(JENKINSFILE, "pipeline {") == JENKINSFILE[JENKINSFILE.index("pipeline {") :].rstrip()
 
 
 def test_settings_come_from_folder_properties_not_parameters():
@@ -94,6 +102,7 @@ def test_the_tunnel_is_checked_before_the_scenarios():
 
 
 if __name__ == "__main__":
+    test_the_pipeline_block_is_balanced()
     test_settings_come_from_folder_properties_not_parameters()
     test_the_agent_is_chosen_inside_the_folder_properties()
     test_parameters_are_the_documented_ones()
