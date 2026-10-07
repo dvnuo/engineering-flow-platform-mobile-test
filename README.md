@@ -2,6 +2,8 @@
 
 The mobile scenario tests that EFP assistants generate, as a plain Python project: behave features, step definitions, and segment modules on top of the Appium Python client, run on BrowserStack real devices by the Jenkins pipeline in [Jenkinsfile](Jenkinsfile). Nothing in this repository depends on EFP; a laptop with Python and a BrowserStack account runs the same tests.
 
+Working here as an agent, or with one: read [AGENTS.md](AGENTS.md) first; it says what to change, what to leave alone, and how to prove a change.
+
 The flow around this repository:
 
 1. A tester records short app segments (log in, skip the introduction, choose a currency) on a BrowserStack device from their own computer, through the Portal Recording panel and the local bridge.
