@@ -120,9 +120,9 @@ pipeline {
         stage('BrowserStack Local') {
           steps {
             script {
-              // One tunnel per build, named after the run; the sessions of the
-              // configs on a private network attach to it by that identifier.
-              // The apps live on the private network, so every build has one.
+              // One tunnel per build, named after the run; the sessions attach
+              // to it by that identifier (every config, unless it says
+              // network: public). The apps live on the private network.
               withCredentials([usernamePassword(credentialsId: env.MOBILE_BROWSERSTACK_CREDENTIALS_ID ?: 'browserstack', usernameVariable: 'BROWSERSTACK_USERNAME', passwordVariable: 'BROWSERSTACK_ACCESS_KEY')]) {
                 sh '''#!/bin/bash
                   set -euo pipefail

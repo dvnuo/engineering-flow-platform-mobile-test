@@ -20,7 +20,7 @@ After the export, the Python is the source: fixes go into the step definitions a
 | `features/<platform>/<KEY>/steps/<KEY>_steps.py` | Its step definitions: each Gherkin step calls segment functions and `mobiletest` helpers |
 | `features/<platform>/<KEY>/environment.py` | behave hooks (imports `mobiletest.hooks`): one BrowserStack session per scenario row, evidence per row |
 | `segments/<platform>/<segment>.py` | A recorded flow as a function of the driver and its parameters; passwords come from `secret("NAME")` |
-| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`private-managed` when the app talks to servers on the private network), the Appium version BrowserStack runs (`appium_version`, 2.19.0 unless set; `BROWSERSTACK_APPIUM_VERSION` overrides it for a run), test data, the secrets the tests need, and the scenario titles' ids |
+| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`public` for an app that needs no tunnel; left out, or anything else, the session goes through the BrowserStack Local tunnel), the Appium version BrowserStack runs (`appium_version`, 2.19.0 unless set; `BROWSERSTACK_APPIUM_VERSION` overrides it for a run), test data, the secrets the tests need, and the scenario titles' ids |
 | `mobiletest/` | The helpers: `find` with fallbacks and drift detection, actions, checks with timeouts, screenshots, the session, the runner, and the report |
 | `runs/<label>/` | A run's results (not committed): `matrix.json`, `cucumber/cucumber.json`, `junit/`, `cases/<row>/evidence.json` with screenshots and video, `logs/` |
 
@@ -31,7 +31,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 export BROWSERSTACK_USERNAME=... BROWSERSTACK_ACCESS_KEY=...
 # The test accounts: a JSON map of profiles (see "Test users" below); MOBILE_TEST_USER picks one, default unless set
 export MOBILE_TEST_USERS_FILE=$HOME/mobile-test-users.json
-# An app on the private network: start a tunnel first and name it for the sessions
+# The tunnel (every config uses it unless it says network: public): start it first and name it for the sessions
 BrowserStackLocal --key "$BROWSERSTACK_ACCESS_KEY" --local-identifier local-1 --daemon start
 export BROWSERSTACK_LOCAL_IDENTIFIER=local-1
 
@@ -88,7 +88,7 @@ The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` 
    - `browserstack`: *Username with password*, holding the BrowserStack username and access key the runs use (another id: `MOBILE_BROWSERSTACK_CREDENTIALS_ID`).
    - `mobile-test-users`: *Secret file*, the test users JSON file described under "Test users" (a build can name another file in `TEST_PROFILE_CREDENTIALS_ID`). Whoever manages the test accounts uploads a new version of the file when they change; `config/<KEY>.<platform>.yaml` lists under `secrets` the fields its tests need.
 4. Install the **Folder Properties** plugin: the Jenkinsfile's `withFolderProperties()` option needs it, even for a job that keeps its settings as environment variables (the folder's *Expose these properties at build start* box can stay unticked). Install the **Cucumber Reports** plugin to see each run's report on the build page; without it the build still archives `cucumber.json` and publishes the JUnit results.
-5. The apps live on the private network, so every build starts a BrowserStack Local tunnel: the job downloads the BrowserStackLocal binary (`MOBILE_LOCAL_BINARY_URL`) and starts one tunnel per build, named after the run, through `MOBILE_LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions of the configs whose `network` is private attach to it. The agent must reach the app's servers. The stage fails with the binary's own message when the tunnel does not connect (its exit code is not trusted), and *Run scenarios* checks the tunnel is still running before it starts; a session that BrowserStack still refuses with *Please set up Local Testing to test* means the tunnel went away in between.
+5. The apps live on the private network, so every build starts a BrowserStack Local tunnel: the job downloads the BrowserStackLocal binary (`MOBILE_LOCAL_BINARY_URL`) and starts one tunnel per build, named after the run, through `MOBILE_LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions attach to it, unless a config says `network: public`. The agent must reach the app's servers. The stage fails with the binary's own message when the tunnel does not connect (its exit code is not trusted), and *Run scenarios* checks the tunnel is still running before it starts; a session that BrowserStack still refuses with *Please set up Local Testing to test* means the tunnel went away in between.
 6. Run the job once by hand with the parameters filled in; Jenkins only picks up a pipeline's parameters after its first run.
 7. Tell the assistant the job path and this repository once. The `generate-mobile-scripts` skill asks for them and keeps them in the scenario plan, together with the credentials ids of the test secrets.
 

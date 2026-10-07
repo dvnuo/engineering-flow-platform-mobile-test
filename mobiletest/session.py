@@ -51,16 +51,20 @@ def _options(platform):
     return options
 
 
-def start(config, session_name, build_name=None, project_name=None):
-    """A BrowserStack device with the build the config names.
+def uses_tunnel(config):
+    """Whether the session goes through the BrowserStack Local tunnel: every
+    config does unless it says network: public. The apps live on the private
+    network, so the tunnel is the default and a config need not declare it."""
+    return str(config.get("network") or "").strip().lower() != "public"
+
+
+def capabilities(config, session_name, build_name=None, project_name=None):
+    """The session's options: the platform's, the app, and the bstack:options
+    block (account, names, device, Appium version, the tunnel).
 
     config is config/<KEY>.<platform>.yaml: platform, app (a custom id or a
     bs:// URL), device, os_version, network.
     """
-    if os.environ.get("MOBILETEST_FAKE_DRIVER"):
-        from mobiletest.fake import FakeDriver
-
-        return FakeDriver(config.get("platform", "android"), session_name)
     user, key = credentials()
     platform = str(config.get("platform", "android")).lower()
     options = _options(platform)
@@ -80,18 +84,26 @@ def start(config, session_name, build_name=None, project_name=None):
         bstack["deviceName"] = str(config["device"])
     if config.get("os_version"):
         bstack["osVersion"] = str(config["os_version"])
-    if str(config.get("network", "")).startswith("private"):
-        # The app is on a private network: the session goes through the
-        # BrowserStack Local tunnel the pipeline (or the tester) started,
-        # named by BROWSERSTACK_LOCAL_IDENTIFIER.
+    if uses_tunnel(config):
+        # The session goes through the BrowserStack Local tunnel the pipeline
+        # (or the tester) started, named by BROWSERSTACK_LOCAL_IDENTIFIER.
         bstack["local"] = True
         identifier = os.environ.get("BROWSERSTACK_LOCAL_IDENTIFIER", "")
         if identifier:
             bstack["localIdentifier"] = identifier
         else:
-            print(f"warning: {config.get('issue')} needs a private network but BROWSERSTACK_LOCAL_IDENTIFIER is not set; the session uses any tunnel of the account", flush=True)
+            print(f"warning: {config.get('issue')} goes through the tunnel but BROWSERSTACK_LOCAL_IDENTIFIER is not set; the session uses any tunnel of the account", flush=True)
     options.set_capability("bstack:options", bstack)
-    return webdriver.Remote(hub_url(), options=options)
+    return options
+
+
+def start(config, session_name, build_name=None, project_name=None):
+    """A BrowserStack device with the build the config names."""
+    if os.environ.get("MOBILETEST_FAKE_DRIVER"):
+        from mobiletest.fake import FakeDriver
+
+        return FakeDriver(config.get("platform", "android"), session_name)
+    return webdriver.Remote(hub_url(), options=capabilities(config, session_name, build_name, project_name))
 
 
 def set_status(driver, passed, reason=""):

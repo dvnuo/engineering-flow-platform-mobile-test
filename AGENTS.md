@@ -13,7 +13,7 @@ A plain Python test project: behave features, step definitions, and segment modu
 | `features/<platform>/<KEY>/<KEY>.feature` | No. It is the Gherkin the requirement owner approved; a change goes through the scenario plan, its review card, and a new export. |
 | `features/<platform>/<KEY>/steps/<KEY>_steps.py` | Yes: a scenario's own actions and checks. |
 | `segments/<platform>/<segment>.py` | Yes: a recorded flow shared by every scenario that calls it. Fix a shared step once, here. |
-| `config/<KEY>.<platform>.yaml` | Rarely: `device`, `os_version`, `appium_version`, `data`. `app`, `secrets`, and `scenarios` come from the export. |
+| `config/<KEY>.<platform>.yaml` | Rarely: `device`, `os_version`, `appium_version`, `data`, `network` (`public` only for an app that needs no tunnel; every other config goes through BrowserStack Local). `app`, `secrets`, and `scenarios` come from the export. |
 | `mobiletest/` | Yes, with a test in `tests/`; every suite shares it. |
 | `Jenkinsfile`, `README.md`, this file | Yes. |
 | `runs/` | Never committed: results. |
