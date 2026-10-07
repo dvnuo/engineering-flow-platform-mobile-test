@@ -61,5 +61,34 @@ def run():
     print("smoke ok:", matrix["summary"])
 
 
+def test_smoke():
+    run()
+
+
+def test_an_error_in_a_step_is_a_failure_with_the_screen():
+    """behave 1.3 marks a step that raised anything but an AssertionError as
+    "error": the matrix, the evidence, and the Cucumber JSON treat it as the
+    failure it is, with the screen at the failure."""
+    out = ROOT / "runs" / "smoke-error"
+    shutil.rmtree(out, ignore_errors=True)
+    screen = dict(SCREEN, **{"Amount exceeds": "!error"})
+    env = dict(os.environ, MOBILETEST_FAKE_DRIVER="1", MOBILETEST_FAKE_SCREEN=json.dumps(screen), MOBILE_SECRET_PASSWORD="not-a-real-password")
+    cmd = [sys.executable, "-m", "mobiletest.run", "--platform", "android", "--row", "over-daily-limit", "--label", "smoke-error", "--out", str(out)]
+    proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    matrix = json.loads((out / "matrix.json").read_text(encoding="utf-8"))
+    row = matrix["rows"][0]
+    assert row["status"] == "failed" and "RuntimeError: fake driver error" in row["error"], row
+    folder = out / "cases" / "android_over-daily-limit_USD-limit"
+    evidence = json.loads((folder / "evidence.json").read_text(encoding="utf-8"))
+    assert evidence["error"]["code"] == "step_error" and "fake driver error" in evidence["error"]["message"], evidence["error"]
+    assert "Traceback" in evidence["error"]["traceback"] and evidence["error"]["step"].startswith("Then the message")
+    assert evidence["failure_screenshot"] == "screenshot.png" and (folder / "screenshot.png").is_file() and (folder / "source.xml").is_file()
+    cucumber = json.loads((out / "cucumber" / "cucumber.json").read_text(encoding="utf-8"))
+    statuses = [s["result"]["status"] for s in cucumber[0]["elements"][0]["steps"]]
+    assert "error" not in statuses and "failed" in statuses, statuses
+
+
 if __name__ == "__main__":
     run()
+    test_an_error_in_a_step_is_a_failure_with_the_screen()

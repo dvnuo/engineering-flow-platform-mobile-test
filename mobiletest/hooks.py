@@ -5,6 +5,7 @@ features/<platform>/<KEY>/environment.py imports everything from here.
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 import yaml
@@ -92,18 +93,46 @@ def before_scenario(context, scenario):
         raise
 
 
+# behave 1.3 says "error" for a step that raised anything but an
+# AssertionError (and "hook_error" for a hook); both are failures whose
+# screen is worth keeping.
+FAILED_STEP = ("failed", "error", "hook_error")
+
+
+def _step_error(step):
+    """The evidence's error for a failed step: a code, the message, and the
+    traceback when the step raised something other than an assertion."""
+    exception = getattr(step, "exception", None)
+    detail = str(getattr(step, "error_message", None) or "")
+    tb = getattr(step, "exc_traceback", None)
+    if exception is not None and tb is not None and "Traceback" not in detail:
+        detail = "".join(traceback.format_exception(type(exception), exception, tb))
+    name = type(exception).__name__ if exception is not None else ""
+    if name == "AssertionError" or (exception is None and "expected" in detail):
+        code = "assertion_failed"
+    elif name in ("ElementNotFound", "NoSuchElementException", "TimeoutException"):
+        code = "element_not_found"
+    elif name:
+        code = "step_error"
+    else:
+        code = "step_failed"
+    if name and name != "AssertionError":
+        message = f"{name}: {exception}"
+    else:
+        message = str(exception) if exception is not None and str(exception) else (detail or "step failed")
+    error = {"code": code, "message": message[:2000], "step": f"{step.keyword} {step.name}"}
+    if code in ("step_error", "element_not_found") and detail:
+        error["traceback"] = detail[-3000:]
+    return error
+
+
 def after_step(context, step):
     rec = getattr(context, "recorder", None)
     if rec is None:
         return
     rec.step_index += 1
-    if _status_name(step.status) == "failed" and rec.error is None:
-        message = getattr(step, "error_message", None) or str(getattr(step, "exception", "") or "step failed")
-        rec.error = {
-            "code": "assertion_failed" if "AssertionError" in str(type(getattr(step, "exception", None))) or "expected" in str(message) else "step_failed",
-            "message": str(message)[:2000],
-            "step": f"{step.keyword} {step.name}",
-        }
+    if _status_name(step.status) in FAILED_STEP and rec.error is None:
+        rec.error = _step_error(step)
         evidence.failure(context.driver)
 
 
@@ -111,6 +140,8 @@ def after_scenario(context, scenario):
     rec = getattr(context, "recorder", None)
     if rec is None:
         return
+    # The duration is the scenario's; waiting for the video is not part of it.
+    context.finished_at = time.time()
     status = _status_name(scenario.status)
     passed = status == "passed"
     if not passed and rec.error is None:
@@ -139,7 +170,7 @@ def _write_evidence(context, status):
         "scenario": context.case_id,
         "example": context.example,
         "status": status,
-        "duration_ms": int((time.time() - context.started_at) * 1000),
+        "duration_ms": int(((getattr(context, "finished_at", None) or time.time()) - context.started_at) * 1000),
         "platform": context.platform,
         "device": info.get("device") or context.cfg.get("device", ""),
         "os_version": info.get("os_version") or context.cfg.get("os_version", ""),
@@ -150,6 +181,11 @@ def _write_evidence(context, status):
         "script": f"features/{context.platform}/{context.issue}.feature",
     }
     if context.collect_video and info.get("video_url"):
-        if session.download(info["video_url"], os.path.join(rec.dir, "video.mp4")):
+        try:
+            session.download(info["video_url"], os.path.join(rec.dir, "video.mp4"))
             doc["video"] = "video.mp4"
+        except session.VideoUnavailable as exc:
+            doc["video_error"] = str(exc)[:500]
+    elif context.collect_video and context.session_id:
+        doc["video_error"] = "BrowserStack had no video link for the session yet"
     evidence.write(rec, doc)

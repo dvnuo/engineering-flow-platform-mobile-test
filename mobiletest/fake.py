@@ -4,9 +4,10 @@ MOBILETEST_FAKE_DRIVER=1 makes the hooks use it instead of BrowserStack.
 Every text locator finds an element whose text is the text looked for; every
 other locator finds an element with no text. MOBILETEST_FAKE_SCREEN, a JSON
 object, overrides that per locator: each key is a substring of a locator
-value, its value the element's text, or null for an element that is not on
-the screen. That runs the steps end to end and produces the same evidence,
-JSON, and matrix a real run would.
+value, its value the element's text, null for an element that is not on the
+screen, or "!error" for a driver that raises on it (what a step that dies on
+something other than an assertion looks like). That runs the steps end to
+end and produces the same evidence, JSON, and matrix a real run would.
 """
 import base64
 import json
@@ -65,6 +66,8 @@ class FakeDriver:
     def find_elements(self, by, value):
         for key, text in _screen().items():
             if key in str(value):
+                if text == "!error":
+                    raise RuntimeError(f"fake driver error for {key!r}")
                 return [] if text is None else [FakeElement(str(text))]
         text = ""
         for marker in ('.text("', '.description("', '.textContains("', 'label == "', 'label CONTAINS "'):
@@ -84,6 +87,13 @@ class FakeDriver:
 
     def execute_script(self, script, *args):
         return None
+
+    def execute(self, command, params=None):
+        # W3C actions (swipes, long presses) go through here.
+        return {"value": None}
+
+    def create_web_element(self, element_id):
+        return FakeElement(str(element_id))
 
     def back(self):
         pass

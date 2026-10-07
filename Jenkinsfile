@@ -238,7 +238,9 @@ pipeline {
             label="${RUN_LABEL:-build-${BUILD_NUMBER}}"
             out="runs/${label}"
             if [ -d "$out" ]; then
-              tar czf "$out/evidence.tar.gz" --exclude='*.mp4' --exclude='evidence.tar.gz' --exclude='behave' -C "$out" .
+              # Written next to the folder, then moved in: tar otherwise sees
+              # its own archive appear and warns "file changed as we read it".
+              tar czf "runs/${label}.evidence.tar.gz" --exclude='*.mp4' --exclude='behave' -C "$out" . && mv "runs/${label}.evidence.tar.gz" "$out/evidence.tar.gz"
             fi
             bin=.efp-bin/BrowserStackLocal; [ -x "$bin" ] || bin="$(command -v BrowserStackLocal || true)"
             [ -n "$bin" ] && "$bin" --local-identifier "${label}" --daemon stop > /dev/null 2>&1 || true

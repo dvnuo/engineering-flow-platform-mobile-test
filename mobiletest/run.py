@@ -258,6 +258,7 @@ def main(argv=None):
             evidence, evidence_path = _evidence(out, row)
             if feature is not None:
                 element = feature["elements"][0]
+                report.fill_error(element, evidence.get("error"))
                 status = report.scenario_status(element)
                 error = report.scenario_error(element)
                 duration = report.scenario_duration_ms(element)
@@ -268,7 +269,7 @@ def main(argv=None):
                 error = error or f"behave produced no result; see {log_path.relative_to(out)}"
             if status == "skipped":
                 status = "failed"
-                error = error or "the row was not run"
+                error = error or "the row was not run: no step ran; see the row's log"
             if status == "failed":
                 failed += 1
             fields = {
@@ -278,6 +279,7 @@ def main(argv=None):
                 "session_url": evidence.get("session_url"),
                 "evidence": f"cases/{row.folder}/evidence.json" if evidence_path.exists() else "",
                 "video": f"cases/{row.folder}/video.mp4" if evidence.get("video") else "",
+                "video_error": evidence.get("video_error"),
                 "screenshots": len(evidence.get("screenshots") or []),
                 "fallback_hits": len(evidence.get("fallback_hits") or []),
                 "error": error if status == "failed" else "",

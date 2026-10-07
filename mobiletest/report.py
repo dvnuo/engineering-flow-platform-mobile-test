@@ -33,9 +33,23 @@ def _tags(node):
     return out
 
 
+# behave's statuses (1.2 and 1.3) as Cucumber's: the Jenkins plugin knows
+# passed, failed, skipped, pending, and undefined only, and behave 1.3 says
+# "error" for a step that raised anything but an AssertionError (and
+# "hook_error" for a hook), which is a failure like any other.
+_STATUS = {
+    "passed": "passed", "failed": "failed", "skipped": "skipped",
+    "error": "failed", "hook_error": "failed", "cleanup_error": "failed",
+    "xfailed": "passed", "xpassed": "failed",
+    "undefined": "undefined", "untested_undefined": "undefined",
+    "pending": "pending", "pending_warn": "pending", "untested_pending": "pending",
+    "untested": "skipped", "untitled": "skipped", "unknown": "skipped", "executing": "skipped",
+}
+
+
 def _status(result):
-    status = str((result or {}).get("status") or "skipped")
-    return {"untested": "skipped", "undefined": "undefined", "untitled": "skipped"}.get(status, status)
+    status = str((result or {}).get("status") or "skipped").lower()
+    return _STATUS.get(status, "failed" if "error" in status or "fail" in status else "skipped")
 
 
 def to_cucumber(feature, platform, uri, keep_names=None):
@@ -102,10 +116,30 @@ def merge(features):
     return [merged[k] for k in order]
 
 
+# The Cucumber statuses that fail a scenario.
+FAILED = ("failed", "undefined", "pending")
+
+
+def fill_error(element, error):
+    """A failed step without a message (behave 1.3 writes none for a step
+    that raised something other than an assertion) takes the evidence's:
+    the message, then the traceback."""
+    if not isinstance(error, dict) or not error.get("message"):
+        return
+    for step in element.get("steps") or []:
+        result = step.get("result") or {}
+        if result.get("status") in FAILED and not result.get("error_message"):
+            text = str(error["message"])
+            if error.get("traceback"):
+                text += "\n" + str(error["traceback"])
+            result["error_message"] = text
+            return
+
+
 def scenario_status(element):
     """passed, failed, or skipped from a Cucumber scenario's steps."""
     statuses = [s["result"]["status"] for s in element.get("steps") or []]
-    if any(s in ("failed", "undefined", "pending") for s in statuses):
+    if any(s in FAILED for s in statuses):
         return "failed"
     if statuses and all(s == "passed" for s in statuses):
         return "passed"
@@ -117,7 +151,7 @@ def scenario_status(element):
 def scenario_error(element):
     for step in element.get("steps") or []:
         result = step.get("result") or {}
-        if result.get("status") in ("failed", "undefined", "pending"):
+        if result.get("status") in FAILED:
             message = result.get("error_message") or f"{result.get('status')} step"
             first = str(message).strip().splitlines()
             return f"{step['keyword']}{step['name']}: {first[-1] if first else message}"[:500]

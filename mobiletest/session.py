@@ -173,20 +173,64 @@ def details(session_id, wait_for_video=60):
     }
 
 
-def download(url, path):
-    """Save a signed BrowserStack URL (a video) to path; returns the path or ''."""
+class VideoUnavailable(RuntimeError):
+    """BrowserStack did not hand out the session's video."""
+
+
+def _is_video(head, content_type):
+    return (content_type.startswith("video/") or head[4:8] == b"ftyp") and not head.lstrip().startswith(b"<")
+
+
+def download(url, path, wait=None, poll=10.0):
+    """Save BrowserStack's session video to path and return the path.
+
+    The file lands on BrowserStack's storage a little after the session ends;
+    until then its signed link answers with an error (an XML AccessDenied, or
+    HTTP 403/404), not a video. This asks again every poll seconds for up to
+    wait seconds (MOBILETEST_VIDEO_WAIT, 120 by default) and raises
+    VideoUnavailable with the last answer when the video never comes; a file
+    that is not a video is never kept.
+    """
     if not url:
-        return ""
-    try:
-        with urllib.request.urlopen(url, timeout=300) as response, open(path, "wb") as out:
-            while True:
-                chunk = response.read(1 << 20)
-                if not chunk:
-                    break
-                out.write(chunk)
-        return path
-    except (urllib.error.URLError, OSError):
-        return ""
+        raise VideoUnavailable("BrowserStack gave no video link")
+    wait = float(os.environ.get("MOBILETEST_VIDEO_WAIT", "120") if wait is None else wait)
+    deadline = time.monotonic() + wait
+    last = "no answer"
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=300) as response:
+                content_type = str(response.headers.get("Content-Type") or "").lower()
+                head = response.read(16)
+                if _is_video(head, content_type):
+                    with open(path, "wb") as out:
+                        out.write(head)
+                        while True:
+                            chunk = response.read(1 << 20)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                    if os.path.getsize(path) > 1024:
+                        return path
+                    last = f"a {os.path.getsize(path)}-byte file"
+                else:
+                    body = (head + response.read(400)).decode("utf-8", "replace")
+                    last = f"{content_type or 'an answer of unknown type'}: {' '.join(body.split())[:300]}"
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = " ".join(exc.read(400).decode("utf-8", "replace").split())
+            except OSError:
+                pass
+            last = f"HTTP {exc.code}" + (f": {body[:300]}" if body else "")
+        except (urllib.error.URLError, OSError) as exc:
+            last = str(exc)[:300]
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            raise VideoUnavailable(f"the video was not available after {int(wait)}s; the last answer was {last}")
+        time.sleep(poll)
 
 
 def plan():

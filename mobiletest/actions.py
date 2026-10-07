@@ -6,6 +6,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.actions import interaction
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.actions.pointer_input import PointerInput
+from selenium.common.exceptions import WebDriverException
 
 from mobiletest.elements import DEFAULT_TIMEOUT, find, platform_of
 
@@ -128,6 +129,31 @@ def scroll_to(driver, locator, direction="down", max_scrolls=5, **kwargs):
     kwargs["optional"] = False
     kwargs["timeout"] = DEFAULT_TIMEOUT
     return find(driver, locator, **kwargs)
+
+
+def scroll_to_end(driver, direction="down", max_swipes=30, settle=0.3):
+    """Swipe through a list or a long text until the screen stops changing,
+    and return the number of swipes it took. For what a member scrolled to
+    the bottom of when recording (terms to accept, a long form): the
+    recording's fixed number of swipes lands elsewhere on another device."""
+    before = _source(driver)
+    swipes = 0
+    for _ in range(max(int(max_swipes), 0)):
+        swipe(driver, "up" if direction == "down" else "down" if direction == "up" else direction)
+        swipes += 1
+        time.sleep(settle)
+        after = _source(driver)
+        if after == before:
+            return swipes
+        before = after
+    return swipes
+
+
+def _source(driver):
+    try:
+        return str(driver.page_source)
+    except WebDriverException:
+        return ""
 
 
 def back(driver):

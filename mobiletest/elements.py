@@ -206,15 +206,41 @@ def _pick(driver, elements, index=None, nearby_text=None, within_text=None):
     return elements
 
 
+W3C_ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
+
+
+def _as_element(driver, raw):
+    """A WebElement out of what the driver listed: the element itself, or a
+    bare element id (a string, or the W3C or legacy dict) the client did not
+    wrap, which happens when the hub's answer is not the shape it expects."""
+    if raw is None or hasattr(raw, "get_attribute"):
+        return raw
+    element_id = raw
+    if isinstance(raw, dict):
+        element_id = raw.get(W3C_ELEMENT) or raw.get("ELEMENT")
+    if isinstance(element_id, str) and element_id and hasattr(driver, "create_web_element"):
+        return driver.create_web_element(element_id)
+    return None
+
+
 def _find_all(driver, by, value):
     try:
-        return list(driver.find_elements(by, value))
+        raw = driver.find_elements(by, value)
     except (NoSuchElementException, InvalidSelectorException):
         return []
     except WebDriverException as exc:
         if "invalid selector" in str(exc).lower():
             return []
         raise
+    if not isinstance(raw, (list, tuple)):
+        # Not a list of elements: a string would otherwise be taken apart
+        # into its characters, and a check would die on one of them.
+        evidence.warn(f"find_elements({by!r}, {value!r}) answered {type(raw).__name__} instead of a list: {str(raw)[:200]!r}")
+        return []
+    found = [el for el in (_as_element(driver, item) for item in raw) if el is not None]
+    if len(found) != len(raw):
+        evidence.warn(f"find_elements({by!r}, {value!r}) answered {len(raw)} items of which {len(raw) - len(found)} are not elements: {str(raw)[:200]!r}")
+    return found
 
 
 def find(driver, locator, fallbacks=(), index=None, nearby_text=None, within_text=None, optional=False, retry=0, timeout=DEFAULT_TIMEOUT):

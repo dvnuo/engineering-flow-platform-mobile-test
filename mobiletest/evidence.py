@@ -24,6 +24,7 @@ class Recorder:
         self.step_index = 0
         self.error = None
         self.failure_screenshot = ""
+        self.warnings = []
         os.makedirs(case_dir, exist_ok=True)
 
     def attach(self, mime_type, data):
@@ -82,6 +83,16 @@ def drift(primary, matched, by, value):
     rec.drift.append({"step": rec.step_index + 1, "target": describe(primary), "matched": describe(matched), "by": str(by), "value": str(value)})
 
 
+def warn(text):
+    """Something odd on the way that is not a failure by itself (the driver
+    answering a find with something other than a list of elements): into the
+    row's log, and evidence.json's warnings."""
+    print(f"warning: {text}", flush=True)
+    rec = _current
+    if rec is not None:
+        rec.warnings.append({"step": rec.step_index + 1, "text": str(text)[:500]})
+
+
 def failure(driver):
     """The screen at the failure: screenshot.png and source.xml."""
     rec = _current
@@ -113,6 +124,8 @@ def write(rec, doc):
         doc["error"] = rec.error
     if rec.failure_screenshot:
         doc["failure_screenshot"] = rec.failure_screenshot
+    if rec.warnings:
+        doc["warnings"] = rec.warnings
     doc["written_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     path = os.path.join(rec.dir, "evidence.json")
     with open(path, "w", encoding="utf-8") as f:
