@@ -28,7 +28,7 @@
 //                                      username and access key (default browserstack)
 //
 // The test accounts come from a Secret file credential named by the build
-// (TEST_USER_CREDENTIALS_ID, default mobile-test-users): a JSON map of
+// (TEST_PROFILE_CREDENTIALS_ID, default mobile-test-users): a JSON map of
 // profiles, "default" and any others, each with username, password, and
 // whatever else the app asks for. A build signs in with the "default" profile.
 // Every build starts a BrowserStack Local tunnel: the apps live on the
@@ -50,7 +50,7 @@ pipeline {
     string(name: 'SCENARIOS', defaultValue: '', description: 'Optional: only these scenarios, space-separated: <scenario id> runs every Examples row of the scenario, <scenario id>#<example> one row, each optionally prefixed <platform>/ (a dry run or a rerun); empty runs everything the tags select')
     string(name: 'ANDROID_APP_ID', defaultValue: '', description: 'Optional: the Android build on BrowserStack to test, already uploaded (bs://... or its custom id); empty uses the app named in config/<KEY>.android.yaml')
     string(name: 'IOS_APP_ID', defaultValue: '', description: 'Optional: the iOS build on BrowserStack to test, already uploaded (bs://... or its custom id); empty uses the app named in config/<KEY>.ios.yaml')
-    string(name: 'TEST_USER_CREDENTIALS_ID', defaultValue: 'mobile-test-users', description: 'The Secret file credential holding the test users file: a JSON map of profiles ("default" and any others), each with username, password, and whatever else the app asks for')
+    string(name: 'TEST_PROFILE_CREDENTIALS_ID', defaultValue: 'mobile-test-users', description: 'The Secret file credential holding the test users file: a JSON map of profiles ("default" and any others), each with username, password, and whatever else the app asks for')
     string(name: 'PARALLEL', defaultValue: '4', description: 'Parallel BrowserStack sessions; the run waits for free ones')
     booleanParam(name: 'COLLECT_VIDEO', defaultValue: true, description: 'Download each session video into the evidence')
   }
@@ -61,7 +61,7 @@ pipeline {
         script {
           env.RUN_LABEL = "build-${env.BUILD_NUMBER}"
           if (!(params.PARALLEL ==~ /[1-9][0-9]?/)) { error 'PARALLEL must be a number from 1 to 99' }
-          if (!params.TEST_USER_CREDENTIALS_ID?.trim()) { error 'TEST_USER_CREDENTIALS_ID must name the Secret file credential holding the test users file' }
+          if (!params.TEST_PROFILE_CREDENTIALS_ID?.trim()) { error 'TEST_PROFILE_CREDENTIALS_ID must name the Secret file credential holding the test users file' }
           env.PLATFORM_LIST = params.PLATFORMS == 'all' ? 'android ios' : params.PLATFORMS
           currentBuild.description = "${params.BRANCH_NAME ?: 'job branch'} ${params.PLATFORMS} ${params.TAGS} ${params.SCENARIOS}".trim()
         }
@@ -140,7 +140,7 @@ pipeline {
           // and removed with the build.
           def bindings = [
             usernamePassword(credentialsId: env.MOBILE_BROWSERSTACK_CREDENTIALS_ID ?: 'browserstack', usernameVariable: 'BROWSERSTACK_USERNAME', passwordVariable: 'BROWSERSTACK_ACCESS_KEY'),
-            file(credentialsId: params.TEST_USER_CREDENTIALS_ID.trim(), variable: 'MOBILE_TEST_USERS_FILE'),
+            file(credentialsId: params.TEST_PROFILE_CREDENTIALS_ID.trim(), variable: 'MOBILE_TEST_USERS_FILE'),
           ]
           def rc = 0
           withCredentials(bindings) {

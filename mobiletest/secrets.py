@@ -7,7 +7,7 @@ fields the app asks for::
      "vip": {"username": "uat-fx-vip", "password": "..."}}
 
 The Jenkins job hands it to the tests as MOBILE_TEST_USERS_FILE (the Secret
-file credential its TEST_USER_CREDENTIALS_ID parameter names); a build signs
+file credential its TEST_PROFILE_CREDENTIALS_ID parameter names); a build signs
 in with the ``default`` profile. On a laptop, export MOBILE_TEST_USERS_FILE
 before running behave, and MOBILE_TEST_USER to sign in with another profile.
 
