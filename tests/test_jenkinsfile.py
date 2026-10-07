@@ -81,9 +81,22 @@ def test_optional_values_are_read_with_defaults():
     assert "installed)" in JENKINSFILE and "`installed`" in README
 
 
+def test_the_tunnel_is_checked_before_the_scenarios():
+    # The binary's exit code is not trusted: its JSON answer must say
+    # connected, a proxy login reaches it, and the run stage makes sure the
+    # tunnel is still there (a session otherwise fails with BrowserStack's
+    # "Please set up Local Testing to test", which says nothing about why).
+    tunnel = JENKINSFILE[JENKINSFILE.index("stage('BrowserStack Local')") : JENKINSFILE.index("stage('Run scenarios')")]
+    assert '"connected"' in tunnel and "local.pid" in tunnel
+    assert "--proxy-user" in tunnel and "--proxy-pass" in tunnel
+    run = JENKINSFILE[JENKINSFILE.index("stage('Run scenarios')") :]
+    assert "kill -0" in run and "rc == 3" in run
+
+
 if __name__ == "__main__":
     test_settings_come_from_folder_properties_not_parameters()
     test_the_agent_is_chosen_inside_the_folder_properties()
     test_parameters_are_the_documented_ones()
     test_optional_values_are_read_with_defaults()
+    test_the_tunnel_is_checked_before_the_scenarios()
     print("ok")

@@ -26,7 +26,8 @@
 //                                      browserstack.com; a copy in your artifact repository works); an
 //                                      absolute path uses that program on the agent, and the word
 //                                      installed the BrowserStackLocal on the agent's PATH
-//   MOBILE_LOCAL_PROXY                 http://host:port the tunnel goes out through (default: the agent's HTTPS_PROXY)
+//   MOBILE_LOCAL_PROXY                 http://host:port (or http://user:password@host:port, percent-encoded)
+//                                      the tunnel goes out through (default: the agent's HTTPS_PROXY)
 //   MOBILE_BROWSERSTACK_CREDENTIALS_ID the Username with password credential holding the BrowserStack
 //                                      username and access key (default browserstack)
 //
@@ -151,13 +152,34 @@ pipeline {
                   esac
                   bin=.efp-bin/BrowserStackLocal
                   args=(--key "${BROWSERSTACK_ACCESS_KEY}" --local-identifier "${RUN_LABEL}" --force-local --daemon start)
+                  # The proxy may carry a login (http://user:password@host:port,
+                  # percent-encoded); BrowserStack Local takes it as its own flags.
                   proxy="${MOBILE_LOCAL_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
                   if [ -n "$proxy" ]; then
-                    hostport="${proxy#*://}"; hostport="${hostport%%/*}"; hostport="${hostport##*@}"
+                    rest="${proxy#*://}"; rest="${rest%%/*}"; hostport="${rest##*@}"
                     args+=(--proxy-host "${hostport%%:*}" --proxy-port "${hostport##*:}" --force-proxy)
+                    if [ "$rest" != "$hostport" ]; then
+                      login="${rest%@*}"
+                      unquote='import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))'
+                      args+=(--proxy-user "$(.venv/bin/python -c "$unquote" "${login%%:*}")" --proxy-pass "$(.venv/bin/python -c "$unquote" "${login#*:}")")
+                    fi
                   fi
-                  "$bin" "${args[@]}" > "runs/${RUN_LABEL}.local.log" 2>&1 || { sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g" "runs/${RUN_LABEL}.local.log"; exit 1; }
-                  sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g" "runs/${RUN_LABEL}.local.log"
+                  log="runs/${RUN_LABEL}.local.log"
+                  "$bin" "${args[@]}" > "$log" 2>&1 || true
+                  sed "s/${BROWSERSTACK_ACCESS_KEY}/***/g" "$log"
+                  # The binary's exit code says little; its JSON answer says whether
+                  # the tunnel is up, and a session finds a connected tunnel only.
+                  parse='import json, sys; d = json.loads(next(l for l in open(sys.argv[1]) if l.lstrip().startswith("{"))); m = d.get("message"); m = m.get("message", "") if isinstance(m, dict) else (m or ""); print(d.get("state", "unknown"), d.get("pid", 0), m)'
+                  answer="$(.venv/bin/python -c "$parse" "$log" 2>/dev/null || echo "unparsable 0 no JSON answer from the binary")"
+                  state="${answer%% *}"; rest="${answer#* }"; pid="${rest%% *}"
+                  if [ "$state" != "connected" ]; then
+                    echo "BrowserStack Local did not connect: ${answer}. Check MOBILE_LOCAL_PROXY (or the agent's HTTPS_PROXY, with its login when the proxy asks for one) and that this agent reaches *.browserstack.com." >&2
+                    exit 1
+                  fi
+                  echo "$pid" > .efp-bin/local.pid
+                  # BrowserStack needs a few seconds before sessions find a new tunnel.
+                  sleep 5
+                  echo "BrowserStack Local is connected as ${RUN_LABEL} (pid ${pid}); the sessions attach to it by that identifier."
                 '''
               }
             }
@@ -179,6 +201,11 @@ pipeline {
                 rc = sh(returnStatus: true, script: '''#!/bin/bash
                   set -uo pipefail
                   rm -rf "runs/${RUN_LABEL}"
+                  pid="$(cat .efp-bin/local.pid 2>/dev/null || echo 0)"
+                  if [ "$pid" -gt 0 ] 2>/dev/null && ! kill -0 "$pid" 2>/dev/null; then
+                    echo "BrowserStack Local (pid ${pid}) is no longer running; the sessions could not reach the private network" >&2
+                    exit 3
+                  fi
                   export BROWSERSTACK_LOCAL_IDENTIFIER="${RUN_LABEL}"
                   args=(-m mobiletest.run --label "${RUN_LABEL}" --out "runs/${RUN_LABEL}" --parallel "${PARALLEL}" --wait-capacity)
                   for platform in ${PLATFORM_LIST}; do args+=(--platform "${platform}"); done
@@ -190,6 +217,9 @@ pipeline {
               }
               if (rc == 2) {
                 error 'No scenario row matched PLATFORMS, TAGS, and SCENARIOS'
+              }
+              if (rc == 3) {
+                error 'BrowserStack Local stopped before the scenarios ran (see the log above); nothing was run'
               }
               if (rc != 0) {
                 // Failed scenarios make the build unstable; the evidence and the
