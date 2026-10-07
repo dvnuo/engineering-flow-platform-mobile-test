@@ -15,6 +15,8 @@ README = (ROOT / "README.md").read_text(encoding="utf-8")
 
 PARAMETERS = ["BRANCH_NAME", "PLATFORMS", "TAGS", "SCENARIOS", "ANDROID_APP_ID", "IOS_APP_ID", "TEST_PROFILE_CREDENTIALS_ID", "PARALLEL", "COLLECT_VIDEO"]
 SETTINGS = ["MOBILE_AGENT_LABEL", "MOBILE_PYTHON", "MOBILE_PIP_INDEX_URL", "MOBILE_LOCAL_BINARY_URL", "MOBILE_LOCAL_PROXY", "MOBILE_BROWSERSTACK_CREDENTIALS_ID"]
+# What a build or a team may leave empty.
+OPTIONAL = ["TAGS", "SCENARIOS", "ANDROID_APP_ID", "IOS_APP_ID", "MOBILE_PYTHON", "MOBILE_PIP_INDEX_URL", "MOBILE_LOCAL_BINARY_URL", "MOBILE_LOCAL_PROXY"]
 
 
 def block(text, opener):
@@ -64,8 +66,24 @@ def test_parameters_are_the_documented_ones():
         assert f"`{name}`" in README, name
 
 
+def test_optional_values_are_read_with_defaults():
+    # Jenkins drops an empty variable from the environment of a process it
+    # starts, and the scripts run with set -u: a parameter or setting that may
+    # be left empty is read with a default, never bare (the first real build
+    # died on "SCENARIOS: unbound variable" with SCENARIOS left blank), and an
+    # empty value is never a signal: BrowserStackLocal already on the agent is
+    # asked for with the word installed.
+    for name in OPTIONAL:
+        assert "${" + name + "}" not in JENKINSFILE, name
+        assert "${" + name + "-" not in JENKINSFILE, name
+        assert "$" + name + " " not in JENKINSFILE and "$" + name + '"' not in JENKINSFILE, name
+    assert "${TAGS:-}" in JENKINSFILE and "${SCENARIOS:-}" in JENKINSFILE
+    assert "installed)" in JENKINSFILE and "`installed`" in README
+
+
 if __name__ == "__main__":
     test_settings_come_from_folder_properties_not_parameters()
     test_the_agent_is_chosen_inside_the_folder_properties()
     test_parameters_are_the_documented_ones()
+    test_optional_values_are_read_with_defaults()
     print("ok")

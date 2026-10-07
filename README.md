@@ -80,9 +80,10 @@ The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` 
    | `MOBILE_AGENT_LABEL` | The agent label the job runs on | `linux` |
    | `MOBILE_PYTHON` | The Python 3.9+ interpreter on the agent | `python3` |
    | `MOBILE_PIP_INDEX_URL` | A PyPI index for the requirements, such as an internal Nexus proxy | pip's default |
-   | `MOBILE_LOCAL_BINARY_URL` | Where the BrowserStackLocal binary is downloaded from; a copy in your artifact repository works; empty uses a `BrowserStackLocal` already on the agent's `PATH` | browserstack.com |
+   | `MOBILE_LOCAL_BINARY_URL` | Where the BrowserStackLocal binary is downloaded from; a copy in your artifact repository works. An absolute path uses that program on the agent; `installed` uses the `BrowserStackLocal` on the agent's `PATH` | browserstack.com |
    | `MOBILE_LOCAL_PROXY` | `http://host:port` the tunnel goes out through | the agent's `HTTPS_PROXY` |
    | `MOBILE_BROWSERSTACK_CREDENTIALS_ID` | The *Username with password* credential with the BrowserStack account | `browserstack` |
+   A setting or parameter left empty is absent from the environment of the processes the job starts (Jenkins drops empty variables when it launches one), so an empty value never means anything here: say `installed` where the table offers it.
 3. Credentials, in the folder's own credentials store or a global one (an id is looked up from the job's folder upwards):
    - `browserstack`: *Username with password*, holding the BrowserStack username and access key the runs use (another id: `MOBILE_BROWSERSTACK_CREDENTIALS_ID`).
    - `mobile-test-users`: *Secret file*, the test users JSON file described under "Test users" (a build can name another file in `TEST_PROFILE_CREDENTIALS_ID`). Whoever manages the test accounts uploads a new version of the file when they change; `config/<KEY>.<platform>.yaml` lists under `secrets` the fields its tests need.

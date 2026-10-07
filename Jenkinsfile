@@ -23,11 +23,17 @@
 //   MOBILE_PYTHON                      the Python 3.9+ interpreter on the agent (default python3)
 //   MOBILE_PIP_INDEX_URL               a PyPI index for the requirements, such as an internal Nexus proxy
 //   MOBILE_LOCAL_BINARY_URL            where the BrowserStackLocal binary is downloaded from (default
-//                                      browserstack.com; a copy in your artifact repository works; set it
-//                                      empty to use a BrowserStackLocal already on the agent's PATH)
+//                                      browserstack.com; a copy in your artifact repository works); an
+//                                      absolute path uses that program on the agent, and the word
+//                                      installed the BrowserStackLocal on the agent's PATH
 //   MOBILE_LOCAL_PROXY                 http://host:port the tunnel goes out through (default: the agent's HTTPS_PROXY)
 //   MOBILE_BROWSERSTACK_CREDENTIALS_ID the Username with password credential holding the BrowserStack
 //                                      username and access key (default browserstack)
+//
+// A parameter or setting left empty is absent from the environment of a
+// process the job starts (Jenkins drops empty variables when it launches
+// one), so every optional value is read with a default below, and an empty
+// value is never a signal.
 //
 // The test accounts come from a Secret file credential named by the build
 // (TEST_PROFILE_CREDENTIALS_ID, default mobile-test-users): a JSON map of
@@ -103,7 +109,7 @@ pipeline {
               python="${MOBILE_PYTHON:-python3}"
               "$python" -m venv .venv
               index=()
-              if [ -n "${MOBILE_PIP_INDEX_URL:-}" ]; then index=(--index-url "${MOBILE_PIP_INDEX_URL}"); fi
+              if [ -n "${MOBILE_PIP_INDEX_URL:-}" ]; then index=(--index-url "${MOBILE_PIP_INDEX_URL:-}"); fi
               .venv/bin/python -m pip install --quiet "${index[@]}" -r requirements.txt
               .venv/bin/python -m behave --version
             '''
@@ -120,14 +126,30 @@ pipeline {
                 sh '''#!/bin/bash
                   set -euo pipefail
                   mkdir -p .efp-bin runs
-                  url="${MOBILE_LOCAL_BINARY_URL-https://www.browserstack.com/browserstack-local/BrowserStackLocal-linux-x64.zip}"
-                  if [ -n "$url" ]; then
-                    curl -fsSL -o .efp-bin/BrowserStackLocal.zip "$url"
-                    (cd .efp-bin && unzip -o -q BrowserStackLocal.zip && chmod +x BrowserStackLocal)
-                    bin=.efp-bin/BrowserStackLocal
-                  else
-                    bin="$(command -v BrowserStackLocal)"
-                  fi
+                  rm -f .efp-bin/BrowserStackLocal
+                  # A URL is downloaded; an absolute path is a program on the agent;
+                  # "installed" is the BrowserStackLocal on the agent's PATH. (An
+                  # empty value is not an option: Jenkins drops empty variables.)
+                  from="${MOBILE_LOCAL_BINARY_URL:-https://www.browserstack.com/browserstack-local/BrowserStackLocal-linux-x64.zip}"
+                  case "$from" in
+                    http://*|https://*)
+                      curl -fsSL -o .efp-bin/BrowserStackLocal.zip "$from"
+                      (cd .efp-bin && unzip -o -q BrowserStackLocal.zip && chmod +x BrowserStackLocal)
+                      ;;
+                    installed)
+                      command -v BrowserStackLocal > /dev/null || { echo "MOBILE_LOCAL_BINARY_URL says installed, but BrowserStackLocal is not on the agent's PATH" >&2; exit 1; }
+                      ln -s "$(command -v BrowserStackLocal)" .efp-bin/BrowserStackLocal
+                      ;;
+                    /*)
+                      [ -x "$from" ] || { echo "MOBILE_LOCAL_BINARY_URL names $from, which is not an executable on this agent" >&2; exit 1; }
+                      ln -s "$from" .efp-bin/BrowserStackLocal
+                      ;;
+                    *)
+                      echo "MOBILE_LOCAL_BINARY_URL must be a URL to download, an absolute path on the agent, or installed: $from" >&2
+                      exit 1
+                      ;;
+                  esac
+                  bin=.efp-bin/BrowserStackLocal
                   args=(--key "${BROWSERSTACK_ACCESS_KEY}" --local-identifier "${RUN_LABEL}" --force-local --daemon start)
                   proxy="${MOBILE_LOCAL_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
                   if [ -n "$proxy" ]; then
@@ -160,8 +182,8 @@ pipeline {
                   export BROWSERSTACK_LOCAL_IDENTIFIER="${RUN_LABEL}"
                   args=(-m mobiletest.run --label "${RUN_LABEL}" --out "runs/${RUN_LABEL}" --parallel "${PARALLEL}" --wait-capacity)
                   for platform in ${PLATFORM_LIST}; do args+=(--platform "${platform}"); done
-                  for tag in ${TAGS}; do args+=(--tags "${tag}"); done
-                  for row in ${SCENARIOS}; do args+=(--row "${row}"); done
+                  for tag in ${TAGS:-}; do args+=(--tags "${tag}"); done
+                  for row in ${SCENARIOS:-}; do args+=(--row "${row}"); done
                   if [ "${COLLECT_VIDEO}" = "true" ]; then args+=(--collect-video); fi
                   .venv/bin/python "${args[@]}"
                 ''')
@@ -183,12 +205,13 @@ pipeline {
         always {
           sh '''#!/bin/bash
             set -uo pipefail
-            out="runs/${RUN_LABEL}"
+            label="${RUN_LABEL:-build-${BUILD_NUMBER}}"
+            out="runs/${label}"
             if [ -d "$out" ]; then
               tar czf "$out/evidence.tar.gz" --exclude='*.mp4' --exclude='evidence.tar.gz' --exclude='behave' -C "$out" .
             fi
             bin=.efp-bin/BrowserStackLocal; [ -x "$bin" ] || bin="$(command -v BrowserStackLocal || true)"
-            [ -n "$bin" ] && "$bin" --local-identifier "${RUN_LABEL}" --daemon stop > /dev/null 2>&1 || true
+            [ -n "$bin" ] && "$bin" --local-identifier "${label}" --daemon stop > /dev/null 2>&1 || true
           '''
           script {
             try {
