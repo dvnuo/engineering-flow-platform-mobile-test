@@ -73,7 +73,7 @@ The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` 
    - a PyPI index for the requirements;
    - wherever app builds are downloaded from.
 
-   Set `HTTPS_PROXY` on the agent if it needs a proxy. The job's own settings are environment variables, set once on the agent (its node properties) or under *Manage Jenkins > System > Global properties*, never build parameters:
+   Set `HTTPS_PROXY` on the agent if it needs a proxy. The job's own settings are set once, never as build parameters: as **Folder Properties** on the folder holding the job (the *Folder Properties* plugin; each team's folder keeps its own, a sub-folder's override its parent's, and a folder property wins over an environment variable of the same name), or as environment variables on the agent (its node properties) or under *Manage Jenkins > System > Global properties*:
 
    | Variable | Meaning | Default |
    | --- | --- | --- |
@@ -83,10 +83,10 @@ The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` 
    | `MOBILE_LOCAL_BINARY_URL` | Where the BrowserStackLocal binary is downloaded from; a copy in your artifact repository works; empty uses a `BrowserStackLocal` already on the agent's `PATH` | browserstack.com |
    | `MOBILE_LOCAL_PROXY` | `http://host:port` the tunnel goes out through | the agent's `HTTPS_PROXY` |
    | `MOBILE_BROWSERSTACK_CREDENTIALS_ID` | The *Username with password* credential with the BrowserStack account | `browserstack` |
-3. Credentials:
+3. Credentials, in the folder's own credentials store or a global one (an id is looked up from the job's folder upwards):
    - `browserstack`: *Username with password*, holding the BrowserStack username and access key the runs use (another id: `MOBILE_BROWSERSTACK_CREDENTIALS_ID`).
    - `mobile-test-users`: *Secret file*, the test users JSON file described under "Test users" (a build can name another file in `TEST_PROFILE_CREDENTIALS_ID`). Whoever manages the test accounts uploads a new version of the file when they change; `config/<KEY>.<platform>.yaml` lists under `secrets` the fields its tests need.
-4. Install the **Cucumber Reports** plugin to see each run's report on the build page; without it the build still archives `cucumber.json` and publishes the JUnit results.
+4. Install the **Folder Properties** plugin: the Jenkinsfile's `withFolderProperties()` option needs it, even for a job that keeps its settings as environment variables (the folder's *Expose these properties at build start* box can stay unticked). Install the **Cucumber Reports** plugin to see each run's report on the build page; without it the build still archives `cucumber.json` and publishes the JUnit results.
 5. The apps live on the private network, so every build starts a BrowserStack Local tunnel: the job downloads the BrowserStackLocal binary (`MOBILE_LOCAL_BINARY_URL`) and starts one tunnel per build, named after the run, through `MOBILE_LOCAL_PROXY` or the agent's `HTTPS_PROXY`; the sessions of the configs whose `network` is private attach to it. The agent must reach the app's servers.
 6. Run the job once by hand with the parameters filled in; Jenkins only picks up a pipeline's parameters after its first run.
 7. Tell the assistant the job path and this repository once. The `generate-mobile-scripts` skill asks for them and keeps them in the scenario plan, together with the credentials ids of the test secrets.
