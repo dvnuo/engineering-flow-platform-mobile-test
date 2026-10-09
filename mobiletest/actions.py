@@ -1,16 +1,40 @@
 """Actions on the device. Every one takes the driver and a locator the way
-the generated code writes them; keyword arguments go to find()."""
+the generated code writes them; keyword arguments go to find().
+
+Gestures send the same W3C actions as mobile-auto's replay of the scenario
+script on the device (internal/mobileauto/commands/observe_actions.go in
+engineering-flow-platform-tools): a swipe is move (0 ms) to start, down,
+pause for hold_ms, move over duration_ms to end, pause for end_hold_ms, up;
+a tap is move, down, pause for hold_ms, up. A point given in percent is
+window.x + window.width * percent / 100, and an element's centre is
+x + width / 2, both rounded half away from zero as Go's math.Round rounds
+them on the device. tests/test_literal_gestures.py pins the sequences both
+sides send.
+"""
+import math
 import time
 
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.actions import interaction
-from selenium.webdriver.common.actions.action_builder import ActionBuilder
-from selenium.webdriver.common.actions.pointer_input import PointerInput
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.remote.command import Command
 
 from mobiletest.elements import DEFAULT_TIMEOUT, find, platform_of
 
 ANDROID_KEYCODE_ENTER = 66
+
+# mobile-auto's swipe by direction: the finger's start and end, in percent of
+# the window, and its default duration.
+DIRECTION_PERCENTS = {
+    "up": ((50, 80), (50, 20)),
+    "down": ((50, 20), (50, 80)),
+    "left": ((80, 50), (20, 50)),
+    "right": ((20, 50), (80, 50)),
+}
+DEFAULT_SWIPE_MS = 500
+# mobile-auto scroll-to's limit: how many swipes before it gives up.
+DEFAULT_MAX_SCROLLS = 8
+# scroll_to_end's limit for a call that names none: what an issue exported
+# before scenario scripts relies on.
+LEGACY_MAX_SWIPES = 30
 
 
 def _found(driver, locator, kwargs):
@@ -40,28 +64,66 @@ def type_text(driver, locator, text, **kwargs):
     return element
 
 
-def _touch(driver):
-    actions = ActionChains(driver)
-    actions.w3c_actions = ActionBuilder(driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch"))
-    return actions
+def _window(driver):
+    """The window's x, y, width, and height, the frame the device's percent
+    points are taken in."""
+    try:
+        rect = driver.get_window_rect()
+        return float(rect.get("x") or 0), float(rect.get("y") or 0), float(rect["width"]), float(rect["height"])
+    except (AttributeError, KeyError, TypeError, WebDriverException):
+        size = driver.get_window_size()
+        return 0.0, 0.0, float(size["width"]), float(size["height"])
 
 
-def _press_at(driver, x, y, hold_ms):
-    actions = _touch(driver)
-    pointer = actions.w3c_actions.pointer_action
-    pointer.move_to_location(int(x), int(y))
-    pointer.pointer_down()
-    pointer.pause(hold_ms / 1000.0)
-    pointer.release()
-    actions.perform()
+def _go_round(value):
+    """Round half away from zero, exactly as Go's math.Round does."""
+    whole = math.trunc(value)
+    if abs(value - whole) >= 0.5:
+        return int(whole + math.copysign(1, value))
+    return int(whole)
+
+
+def _px(origin, size, percent):
+    """A coordinate in percent of the window, rounded the way the device
+    rounds it (half away from zero)."""
+    return _go_round(origin + size * float(percent) / 100)
+
+
+def _point(window, x_percent, y_percent):
+    wx, wy, ww, wh = window
+    return _px(wx, ww, x_percent), _px(wy, wh, y_percent)
+
+
+def _gesture(driver, steps):
+    """Send one finger's W3C actions, built as the device's replay builds
+    them: ("move", ms, x, y), ("down",), ("pause", ms), ("up",)."""
+    actions = []
+    for step in steps:
+        kind = step[0]
+        if kind == "move":
+            actions.append({"type": "pointerMove", "duration": int(step[1]), "x": int(step[2]), "y": int(step[3])})
+        elif kind == "down":
+            actions.append({"type": "pointerDown", "button": 0})
+        elif kind == "pause":
+            if int(step[1]) > 0:
+                actions.append({"type": "pause", "duration": int(step[1])})
+        elif kind == "up":
+            actions.append({"type": "pointerUp", "button": 0})
+    source = {"type": "pointer", "id": "finger1", "parameters": {"pointerType": "touch"}, "actions": actions}
+    driver.execute(Command.W3C_ACTIONS, {"actions": [source]})
+
+
+def _center(element):
+    r = element.rect
+    return _go_round(r["x"] + r["width"] / 2), _go_round(r["y"] + r["height"] / 2)
 
 
 def long_press(driver, locator, duration_ms=800, **kwargs):
     element = _found(driver, locator, kwargs)
     if element is None:
         return None
-    r = element.rect
-    _press_at(driver, r["x"] + r["width"] / 2, r["y"] + r["height"] / 2, duration_ms)
+    x, y = _center(element)
+    _gesture(driver, [("move", 0, x, y), ("down",), ("pause", duration_ms), ("up",)])
     return element
 
 
@@ -69,84 +131,99 @@ def double_tap(driver, locator, **kwargs):
     element = _found(driver, locator, kwargs)
     if element is None:
         return None
-    r = element.rect
-    x, y = r["x"] + r["width"] / 2, r["y"] + r["height"] / 2
-    actions = _touch(driver)
-    pointer = actions.w3c_actions.pointer_action
-    for _ in range(2):
-        pointer.move_to_location(int(x), int(y))
-        pointer.pointer_down()
-        pointer.pause(0.05)
-        pointer.release()
-        pointer.pause(0.1)
-    actions.perform()
+    x, y = _center(element)
+    _gesture(driver, [("move", 0, x, y), ("down",), ("up",), ("pause", 100), ("down",), ("up",)])
     return element
 
 
-def tap_point(driver, x=None, y=None, x_percent=None, y_percent=None):
-    """A tap at absolute pixels, or at a percentage of the screen."""
+def tap_point(driver, x=None, y=None, x_percent=None, y_percent=None, hold_ms=0):
+    """A tap at absolute pixels, or at a percentage of the window, resting
+    hold_ms before lifting: what a coordinate tap of a recording replays as
+    when no element could be named."""
     if x_percent is not None or y_percent is not None:
-        size = driver.get_window_size()
-        x = size["width"] * float(x_percent or 0) / 100.0
-        y = size["height"] * float(y_percent or 0) / 100.0
-    _press_at(driver, x or 0, y or 0, 100)
+        x, y = _point(_window(driver), x_percent or 0, y_percent or 0)
+    _gesture(driver, [("move", 0, x or 0, y or 0), ("down",), ("pause", hold_ms), ("up",)])
 
 
-def swipe(driver, direction="up", distance=0.6, duration_ms=600):
-    """A swipe across the screen's middle in the given direction."""
-    size = driver.get_window_size()
-    w, h = size["width"], size["height"]
-    cx, cy = w / 2, h / 2
-    span = distance / 2
-    moves = {
-        "up": ((cx, h * (0.5 + span)), (cx, h * (0.5 - span))),
-        "down": ((cx, h * (0.5 - span)), (cx, h * (0.5 + span))),
-        "left": ((w * (0.5 + span), cy), (w * (0.5 - span), cy)),
-        "right": ((w * (0.5 - span), cy), (w * (0.5 + span), cy)),
-    }
-    (x1, y1), (x2, y2) = moves.get(direction, moves["up"])
-    actions = _touch(driver)
-    pointer = actions.w3c_actions.pointer_action
-    pointer.move_to_location(int(x1), int(y1))
-    pointer.pointer_down()
-    pointer.pause(0.1)
-    pointer.move_to_location(int(x2), int(y2))
-    pointer.pause(duration_ms / 1000.0)
-    pointer.release()
-    actions.perform()
+def swipe(driver, direction="up", distance=0.6, duration_ms=DEFAULT_SWIPE_MS, start=None, end=None, hold_ms=0, end_hold_ms=0):
+    """A swipe. With start and end ((x, y) in percent of the window, as a
+    scenario script records them) it is that swipe; otherwise it is
+    mobile-auto's swipe in the direction the finger moves, across distance
+    of the window through its middle."""
+    if start is None or end is None:
+        if direction not in DIRECTION_PERCENTS:
+            direction = "up"
+        if distance == 0.6:
+            start, end = DIRECTION_PERCENTS[direction]
+        else:
+            half = float(distance) * 50
+            start, end = {
+                "up": ((50, 50 + half), (50, 50 - half)),
+                "down": ((50, 50 - half), (50, 50 + half)),
+                "left": ((50 + half, 50), (50 - half, 50)),
+                "right": ((50 - half, 50), (50 + half, 50)),
+            }[direction]
+    window = _window(driver)
+    x1, y1 = _point(window, *start)
+    x2, y2 = _point(window, *end)
+    _gesture(driver, [("move", 0, x1, y1), ("down",), ("pause", hold_ms), ("move", duration_ms or DEFAULT_SWIPE_MS, x2, y2), ("pause", end_hold_ms), ("up",)])
 
 
-def scroll_to(driver, locator, direction="down", max_scrolls=5, **kwargs):
-    """Swipe until the element is on screen, then return it."""
+def _finger(direction):
+    """The swipe that looks in a direction: down (further down the page) is a
+    swipe up; left and right swipe that way."""
+    return {"down": "up", "up": "down"}.get(direction, direction)
+
+
+def scroll_to(driver, locator, direction="down", max_scrolls=DEFAULT_MAX_SCROLLS, **kwargs):
+    """Swipe until the element is on screen, then return it: at most
+    max_scrolls swipes, like mobile-auto scroll-to. An optional step that
+    never finds it returns None, as the device's replay passes it."""
+    optional = bool(kwargs.pop("optional", False))
     kwargs.setdefault("timeout", 1)
     kwargs["optional"] = True
-    for _ in range(max(int(max_scrolls), 0) + 1):
+    limit = max(int(max_scrolls), 0)
+    for i in range(limit + 1):
         element = find(driver, locator, **kwargs)
         if element is not None:
             return element
-        swipe(driver, "up" if direction == "down" else "down" if direction == "up" else direction)
+        if i == limit:
+            break
+        swipe(driver, _finger(direction))
         time.sleep(0.3)
-    kwargs["optional"] = False
+    kwargs["optional"] = optional
     kwargs["timeout"] = DEFAULT_TIMEOUT
     return find(driver, locator, **kwargs)
 
 
-def scroll_to_end(driver, direction="down", max_swipes=30, settle=0.3):
-    """Swipe through a list or a long text until the screen stops changing,
-    and return the number of swipes it took. For what a member scrolled to
-    the bottom of when recording (terms to accept, a long form): the
-    recording's fixed number of swipes lands elsewhere on another device."""
+def scroll_to_end(driver, direction="down", max_swipes=None, settle=0.3):
+    """Swipe through a list or a long text until the end, and return the
+    number of swipes it took.
+
+    With max_swipes, as a scenario script's export always writes it, this is
+    the device's scroll to an edge: it stops when the screen shows what it
+    showed before (unchanged, or back to an earlier screen), and still
+    changing after max_swipes is a failure: the end was not reached. Without
+    it, as an issue exported before scenario scripts calls it, it stops when
+    the screen stops changing, or quietly after 30 swipes, as it always did.
+    """
+    legacy = max_swipes is None
+    limit = LEGACY_MAX_SWIPES if legacy else max(int(max_swipes), 0)
     before = _source(driver)
+    seen = {before}
     swipes = 0
-    for _ in range(max(int(max_swipes), 0)):
-        swipe(driver, "up" if direction == "down" else "down" if direction == "up" else direction)
+    for _ in range(limit):
+        swipe(driver, _finger(direction))
         swipes += 1
         time.sleep(settle)
         after = _source(driver)
-        if after == before:
+        if after == before or (not legacy and after in seen):
             return swipes
+        seen.add(after)
         before = after
-    return swipes
+    if legacy:
+        return swipes
+    raise AssertionError(f"the screen was still changing after {swipes} swipes; the end was not reached")
 
 
 def _source(driver):

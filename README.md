@@ -1,26 +1,26 @@
 # Mobile scenario tests
 
-The mobile scenario tests that EFP assistants generate, as a plain Python project: behave features, step definitions, and segment modules on top of the Appium Python client, run on BrowserStack real devices by the Jenkins pipeline in [Jenkinsfile](Jenkinsfile). Nothing in this repository depends on EFP; a laptop with Python and a BrowserStack account runs the same tests.
+The mobile scenario tests that EFP assistants generate, as a plain Python project: behave features and their step definitions on top of the Appium Python client, run on BrowserStack real devices by the Jenkins pipeline in [Jenkinsfile](Jenkinsfile). Nothing in this repository depends on EFP; a laptop with Python and a BrowserStack account runs the same tests.
 
 Working here as an agent, or with one: read [AGENTS.md](AGENTS.md) first; it says what to change, what to leave alone, and how to prove a change.
 
 The flow around this repository:
 
-1. A tester records short app segments (log in, skip the introduction, choose a currency) on a BrowserStack device from their own computer, through the Portal Recording panel and the local bridge.
-2. The assistant compiles the recordings, binds the checks of the approved scenarios of a Jira issue, and exports the result here (`mobile-auto test export`) on a branch `efp/<KEY>`: the feature file the business analyst approved, its step definitions, the segments as Python functions, and a config file with the app, device, and test data. Every generated line that comes from a recording carries a `# recorded:` comment with the recorded call, so what was recorded and what the assistant added are told apart in review.
-3. The pipeline runs the scenario rows in parallel, one session per Examples row, and publishes a Cucumber report, JUnit results, and one folder of evidence (screenshots, the screen at a failure, the video) per row.
+1. A tester records a whole scenario of a Jira issue on a BrowserStack device from their own computer, through the Portal's Mobile testing panel and the local bridge.
+2. The assistant compiles the recording into the scenario's script (`mobile-auto inspector script`): every recorded action in its order, swipes as they were made, coordinate taps named by the element under the finger, values as typed, passwords read from the test users file. The panel replays the script on the device; another scenario is another recording, or a copy of a script with its values changed.
+3. The assistant exports the approved scenarios here (`mobile-auto test export --scripts`) on a branch `efp/<KEY>`: one folder per scenario with its feature (one plain Scenario in the words the business analyst approved), its step definitions (the script's steps as literal Python), and a config file with the app and device. Every generated line that comes from a recording carries a `# recorded:` comment with the recorded call, so what was recorded and what the assistant added are told apart in review.
+4. The pipeline runs the scenarios in parallel, one session each, and publishes a Cucumber report, JUnit results, and one folder of evidence (a screenshot after every step, the screen at a failure, the video) per scenario.
 
-After the export, the Python is the source: fixes go into the step definitions and the segment modules here, by the assistant or by a person. The export never overwrites a file that was edited by hand.
+After the export, the Python is the source: fixes go into the scenario's step definitions here, by the assistant or by a person. The export never overwrites a file that was edited by hand.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `features/<platform>/<KEY>/<KEY>.feature` | The Gherkin of one Jira issue on one platform: Background, Scenario Outlines, Examples |
-| `features/<platform>/<KEY>/steps/<KEY>_steps.py` | Its step definitions: each Gherkin step calls segment functions and `mobiletest` helpers |
-| `features/<platform>/<KEY>/environment.py` | behave hooks (imports `mobiletest.hooks`): one BrowserStack session per scenario row, evidence per row |
-| `segments/<platform>/<segment>.py` | A recorded flow as a function of the driver and its parameters; passwords come from `secret("NAME")` |
-| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`public` for an app that needs no tunnel; left out, or anything else, the session goes through the BrowserStack Local tunnel), the Appium version BrowserStack runs (`appium_version`, 2.19.0 unless set; `BROWSERSTACK_APPIUM_VERSION` overrides it for a run), test data, the secrets the tests need, and the scenario titles' ids |
+| `features/<platform>/<KEY>/<id>/<id>.feature` | One scenario of a Jira issue on one platform: a plain Scenario, its values in its steps |
+| `features/<platform>/<KEY>/<id>/steps/<id>_steps.py` | Its step definitions: the recorded actions, in order, as literal `mobiletest` calls; passwords come from `secret("NAME")` |
+| `features/<platform>/<KEY>/<id>/environment.py` | behave hooks (imports `mobiletest.hooks`): one BrowserStack session per scenario, evidence per scenario |
+| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`public` for an app that needs no tunnel; left out, or anything else, the session goes through the BrowserStack Local tunnel), the Appium version BrowserStack runs (`appium_version`, 2.19.0 unless set; `BROWSERSTACK_APPIUM_VERSION` overrides it for a run), the secrets the tests need, and the scenario titles' ids |
 | `mobiletest/` | The helpers: `find` with fallbacks and drift detection, actions, checks with timeouts, screenshots, the session, the runner, and the report |
 | `runs/<label>/` | A run's results (not committed): `matrix.json`, `cucumber/cucumber.json`, `junit/`, `cases/<row>/evidence.json` with screenshots and video, `logs/` |
 
@@ -35,20 +35,23 @@ export MOBILE_TEST_USERS_FILE=$HOME/mobile-test-users.json
 BrowserStackLocal --key "$BROWSERSTACK_ACCESS_KEY" --local-identifier local-1 --daemon start
 export BROWSERSTACK_LOCAL_IDENTIFIER=local-1
 
-# Every row of FX-12 on Android, four devices at a time
+# Every scenario of FX-12 on Android, four devices at a time
 .venv/bin/python -m mobiletest.run --platform android --tags @FX-12 --parallel 4 --label local-1 --collect-video
 
-# One row again
-.venv/bin/python -m mobiletest.run --row buy-foreign-currency#USD --label local-2
+# One scenario again
+.venv/bin/python -m mobiletest.run --row buy-100-usd --label local-2
 
-# What would run
+# What would run, and whether every step has a definition
 .venv/bin/python -m mobiletest.run --platform android --tags @FX-12 --list
+.venv/bin/python -m mobiletest.run --check
 
-# Plain behave, one row after the other, no matrix
-.venv/bin/behave features/android/FX-12 --tags @FX-12 -D evidence_dir=runs/local/cases
+# Plain behave, one scenario folder, no matrix
+.venv/bin/behave features/android/FX-12/buy-100-usd -D evidence_dir=runs/local/cases
 ```
 
-The runner starts one `behave` process per scenario row, prints the matrix as `EFP-MATRIX <json>` whenever it changes, and merges the rows' JSON into `runs/<label>/cucumber/cucumber.json`. Rows from several platforms share one run: their ids read `android/buy-foreign-currency#USD` and `ios/buy-foreign-currency#USD`.
+The runner starts one `behave` process per scenario, prints the matrix as `EFP-MATRIX <json>` whenever it changes, and merges the scenarios' JSON into `runs/<label>/cucumber/cucumber.json`. Rows from several platforms share one run: their ids read `android/buy-100-usd` and `ios/buy-100-usd`. An issue exported before scenario scripts, as one feature with Scenario Outlines in `features/<platform>/<KEY>/`, still runs: each of its Examples rows is a row, `android/buy-foreign-currency#USD`.
+
+The gestures (`swipe`, `tap_point`, `long_press`, `double_tap`) send the same W3C actions as mobile-auto's replay of the script on the device, so a scenario that passed its replay makes the same moves here; `tests/test_literal_gestures.py` pins them.
 
 `MOBILETEST_FAKE_DRIVER=1` runs everything against a stand-in driver, without a device or an account: the smoke test in `tests/` uses it to check the project, the runner, and the report end to end.
 
@@ -63,7 +66,7 @@ The accounts the tests sign in with live in one JSON file, a map of profiles: `d
 }
 ```
 
-The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` unless a build names another in `TEST_PROFILE_CREDENTIALS_ID` (a second file for another environment, say); the job hands it to the tests as `MOBILE_TEST_USERS_FILE`, and a build signs in with the `default` profile. In the tests, `secret("MOBILE_SECRET_PASSWORD")`, which recorded password fields turn into, reads the profile's `password` (the name without `MOBILE_SECRET_`, in lower case); `user_value("username")` reads any other field, `user_value("username", "vip")` another profile's; `profile()` the whole map. An environment variable named like the secret (`MOBILE_SECRET_PASSWORD`) still wins, so one value can be passed without a file, and `MOBILE_TEST_USER` picks another profile on a laptop. The values never pass through the assistant: it knows only the field names a segment needs.
+The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` unless a build names another in `TEST_PROFILE_CREDENTIALS_ID` (a second file for another environment, say); the job hands it to the tests as `MOBILE_TEST_USERS_FILE`, and a build signs in with the `default` profile. In the tests, `secret("MOBILE_SECRET_PASSWORD")`, which recorded password fields turn into, reads the profile's `password` (the name without `MOBILE_SECRET_`, in lower case); `user_value("username")` reads any other field, `user_value("username", "vip")` another profile's; `profile()` the whole map. An environment variable named like the secret (`MOBILE_SECRET_PASSWORD`) still wins, so one value can be passed without a file, and `MOBILE_TEST_USER` picks another profile on a laptop. The values never pass through the assistant: it knows only the field names a script needs.
 
 ## The Jenkins job
 
@@ -99,7 +102,7 @@ The team keeps it in Jenkins as a *Secret file* credential, `mobile-test-users` 
 | `BRANCH_NAME` | Branch, tag, or commit of this repository to run (the assistant pushes `efp/<KEY>`); empty runs the job's configured branch |
 | `PLATFORMS` | `all`, `android`, or `ios` |
 | `TAGS` | behave tag expressions a scenario must match, for example `@FX-12` (the issue's tag); empty runs everything |
-| `SCENARIOS` | Optional: only these scenarios: `<scenario id>` runs every Examples row of the scenario, `<scenario id>#<example>` one row, each optionally prefixed `<platform>/`; a dry run or a rerun |
+| `SCENARIOS` | Optional: only these scenarios, by id (`buy-100-usd`), each optionally prefixed `<platform>/`; in an issue exported with Examples, `<scenario id>` runs every row and `<scenario id>#<example>` one; a dry run or a rerun |
 | `ANDROID_APP_ID`, `IOS_APP_ID` | Optional: a build already on BrowserStack (`bs://...` or its custom id) to test instead of the one `config/<KEY>.<platform>.yaml` names |
 | `TEST_PROFILE_CREDENTIALS_ID` | The *Secret file* credential holding the test users file (`mobile-test-users`) |
 | `PARALLEL` | Sessions at a time; the runner waits for free parallel sessions when others use the account |

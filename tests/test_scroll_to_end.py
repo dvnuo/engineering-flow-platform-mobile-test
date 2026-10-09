@@ -1,5 +1,8 @@
-"""scroll_to_end swipes until the screen stops changing: the end of a list or
-a long text, wherever it is on this device."""
+"""scroll_to_end swipes until the screen stops changing, and scroll_to until
+the element shows: both stop after the device's limit, 8 swipes unless the
+step says otherwise, and the end not reached is a failure, as on the device."""
+import pytest
+
 from mobiletest import actions
 from mobiletest.fake import FakeDriver
 
@@ -29,6 +32,72 @@ def test_it_stops_when_the_screen_stops_changing():
     assert driver.swipes == 3
 
 
-def test_it_gives_up_after_max_swipes_on_a_screen_that_keeps_moving():
+def test_a_screen_still_moving_after_the_limit_fails():
     driver = Scrolling([str(i) for i in range(100)])
-    assert actions.scroll_to_end(driver, max_swipes=4, settle=0) == 4
+    with pytest.raises(AssertionError, match="still changing after 4 swipes"):
+        actions.scroll_to_end(driver, max_swipes=4, settle=0)
+    assert driver.swipes == 4
+
+
+def test_the_exported_limit_is_the_devices():
+    driver = Scrolling([str(i) for i in range(100)])
+    with pytest.raises(AssertionError, match="after 8 swipes"):
+        actions.scroll_to_end(driver, max_swipes=8, settle=0)
+    assert driver.swipes == 8
+
+
+def test_back_to_an_earlier_screen_is_the_end_as_on_the_device():
+    # A spinner at the end of the list: the screens alternate.
+    driver = Scrolling(["top", "end", "end-spinning", "end", "end-spinning"])
+    assert actions.scroll_to_end(driver, max_swipes=8, settle=0) == 3
+    assert driver.swipes == 3
+
+
+def test_a_call_without_a_limit_keeps_the_older_exports_behaviour():
+    # An issue exported before scenario scripts writes no limit: up to 30
+    # swipes, and the end not reached is not a failure there.
+    driver = Scrolling([str(i) for i in range(12)] + ["11"])
+    assert actions.scroll_to_end(driver, settle=0) == 12
+    driver = Scrolling([str(i) for i in range(100)])
+    assert actions.scroll_to_end(driver, settle=0) == 30
+
+
+class Searching(Scrolling):
+    """The element shows after `found_after` swipes."""
+
+    def __init__(self, found_after):
+        super().__init__(["x"])
+        self.found_after = found_after
+
+    def find_elements(self, by, value):
+        return super().find_elements(by, value) if self.swipes >= self.found_after else []
+
+
+def test_scroll_to_swipes_at_most_max_scrolls_times(monkeypatch):
+    monkeypatch.setattr(actions.time, "sleep", lambda s: None)
+    driver = Searching(found_after=3)
+    assert actions.scroll_to(driver, ("id", "fees"), max_scrolls=3, timeout=0) is not None
+    assert driver.swipes == 3
+    driver = Searching(found_after=99)
+    with pytest.raises(AssertionError):
+        actions.scroll_to(driver, ("id", "fees"), max_scrolls=3, timeout=0)
+    assert driver.swipes == 3, "no swipe after the last look"
+
+
+def test_an_optional_scroll_to_that_finds_nothing_passes(monkeypatch):
+    monkeypatch.setattr(actions.time, "sleep", lambda s: None)
+    monkeypatch.setattr(actions, "DEFAULT_TIMEOUT", 0)
+    driver = Searching(found_after=99)
+    assert actions.scroll_to(driver, ("id", "fees"), max_scrolls=2, timeout=0, optional=True) is None
+    assert driver.swipes == 2
+
+
+def test_scroll_to_looks_down_with_a_swipe_up(monkeypatch):
+    monkeypatch.setattr(actions.time, "sleep", lambda s: None)
+    driver = FakeDriver("android", "scroll")
+    driver.find_elements = lambda by, value: []
+    monkeypatch.setattr(actions, "DEFAULT_TIMEOUT", 0)
+    with pytest.raises(AssertionError):
+        actions.scroll_to(driver, ("id", "fees"), max_scrolls=1, timeout=0)
+    start, end = driver.gestures[0][0], driver.gestures[0][2]
+    assert start["y"] > end["y"], "the finger moves up to show what is further down"

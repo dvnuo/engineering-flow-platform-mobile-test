@@ -62,6 +62,8 @@ class FakeDriver:
         self.session_id = "fake-" + session_name.replace("#", "-")
         self.page_source = "<hierarchy/>"
         self.switch_to = _SwitchTo()
+        # The W3C actions each gesture sent, for tests that compare them.
+        self.gestures = []
 
     def find_elements(self, by, value):
         for key, text in _screen().items():
@@ -85,11 +87,17 @@ class FakeDriver:
     def get_window_size(self):
         return {"width": 1080, "height": 2400}
 
+    def get_window_rect(self):
+        return {"x": 0, "y": 0, "width": 1080, "height": 2400}
+
     def execute_script(self, script, *args):
         return None
 
     def execute(self, command, params=None):
-        # W3C actions (swipes, long presses) go through here.
+        # W3C actions (swipes, taps by coordinates, long presses) go through here.
+        if command == "actions" and params:
+            for source in params.get("actions") or []:
+                self.gestures.append(source.get("actions"))
         return {"value": None}
 
     def create_web_element(self, element_id):
