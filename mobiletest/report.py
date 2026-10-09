@@ -56,7 +56,10 @@ def to_cucumber(feature, platform, uri, keep_names=None):
     """One behave feature as a Cucumber JSON feature. keep_names limits the
     scenarios to those names (a row's own JSON also lists the rows that were
     skipped)."""
-    fid = slug(f"{feature.get('name', 'feature')}-{platform}")
+    # The file's stem keeps the id unique when every scenario of an issue is
+    # a feature of its own with the issue's title.
+    stem = str(uri).replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    fid = slug(f"{feature.get('name', 'feature')}-{platform}-{stem}")
     elements = []
     for el in feature.get("elements") or []:
         if el.get("type") == "background":

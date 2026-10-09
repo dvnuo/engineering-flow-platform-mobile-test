@@ -1,10 +1,10 @@
 // Mobile scenario runs for EFP assistants.
 //
 // The tests are a plain Python project: behave features under
-// features/<platform>/<KEY>/, step definitions and segment modules the
+// features/<platform>/<KEY>/<scenario id>/, each with the step definitions the
 // assistant generated, and the mobiletest helpers. This job installs the
 // requirements, runs the selected scenario rows in parallel on BrowserStack
-// (one session per Examples row), and publishes the Cucumber report, the JUnit
+// (one session per scenario), and publishes the Cucumber report, the JUnit
 // results, and the evidence. Nothing here needs EFP; the same command runs on
 // a laptop.
 //
@@ -59,7 +59,7 @@ pipeline {
     string(name: 'BRANCH_NAME', defaultValue: '', description: 'Branch, tag, or commit of this repository to run (the assistant pushes efp/<KEY>); empty runs the branch the job is configured with')
     choice(name: 'PLATFORMS', choices: ['all', 'android', 'ios'], description: 'The platforms to run')
     string(name: 'TAGS', defaultValue: '', description: 'Space-separated behave tag expressions, all of which a scenario must match, for example @FX-12 or @FX-12 @positive; empty runs every scenario')
-    string(name: 'SCENARIOS', defaultValue: '', description: 'Optional: only these scenarios, space-separated: <scenario id> runs every Examples row of the scenario, <scenario id>#<example> one row, each optionally prefixed <platform>/ (a dry run or a rerun); empty runs everything the tags select')
+    string(name: 'SCENARIOS', defaultValue: '', description: 'Optional: only these scenarios, space-separated: <scenario id>, each optionally prefixed <platform>/; in an issue exported with Examples, <scenario id>#<example> one row (a dry run or a rerun); empty runs everything the tags select')
     string(name: 'ANDROID_APP_ID', defaultValue: '', description: 'Optional: the Android build on BrowserStack to test, already uploaded (bs://... or its custom id); empty uses the app named in config/<KEY>.android.yaml')
     string(name: 'IOS_APP_ID', defaultValue: '', description: 'Optional: the iOS build on BrowserStack to test, already uploaded (bs://... or its custom id); empty uses the app named in config/<KEY>.ios.yaml')
     string(name: 'TEST_PROFILE_CREDENTIALS_ID', defaultValue: 'mobile-test-users', description: 'The Secret file credential holding the test users file: a JSON map of profiles ("default" and any others), each with username, password, and whatever else the app asks for')

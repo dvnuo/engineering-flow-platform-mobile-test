@@ -1,6 +1,8 @@
 """behave hooks: one BrowserStack session per scenario row, evidence per row.
 
-features/<platform>/<KEY>/environment.py imports everything from here.
+The environment.py of each scenario folder (features/<platform>/<KEY>/<id>/),
+and of an issue exported as one feature (features/<platform>/<KEY>/), imports
+everything from here.
 """
 import os
 import sys

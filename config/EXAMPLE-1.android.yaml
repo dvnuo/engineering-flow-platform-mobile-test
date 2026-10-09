@@ -1,14 +1,13 @@
-# mobile-auto export: source=mobile/suites/EXAMPLE-1/android.yaml source_sha256=98581449b22d13db4eff19b4e1caab626e89721cad17c97fd281d625acefcf5d content_sha256=42ec4ac67b0ceeca2b93d297dcafaf0bb848132c7eefe8c74d6cb5a17d381cdf
+# mobile-auto export: source=mobile/scenarios/EXAMPLE-1/scenarios.json source_sha256=c885ef1862fc9bf6c4561915cf0963f5dbe8c56ef61c1c5b8c4a6bffaf359254 content_sha256=c832afde997685c09bf9c70e2a02d55b142be05788a11a85934da72af546ce6f
 issue: EXAMPLE-1
 issue_url: https://jira.example.com/browse/EXAMPLE-1
 platform: android
 app: fxapp-android-uat
 device: Google Pixel 8
 build: EXAMPLE-1
-data:
-    username: uat-fx-01
 secrets:
     - MOBILE_SECRET_PASSWORD
 scenarios:
-    Buy foreign currency within the daily limit: buy-foreign-currency
-    Buying over the daily limit is refused: over-daily-limit
+    Buy 100 USD within the daily limit: buy-100-usd
+    Buy 250 EUR within the daily limit: buy-250-eur
+    Buying 50001 USD over the daily limit is refused: over-daily-limit-usd
