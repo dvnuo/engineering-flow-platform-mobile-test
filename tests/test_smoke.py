@@ -46,6 +46,8 @@ def run():
     assert evidence["failure_screenshot"] == "screenshot.png" and (OUT / "cases" / "android_buy-250-eur" / "screenshot.png").is_file()
     assert (OUT / "cases" / "android_buy-250-eur" / "source.xml").is_file()
     passed = json.loads((OUT / "cases" / "android_buy-100-usd" / "evidence.json").read_text(encoding="utf-8"))
+    # The evidence names the feature as the matrix does: its copy in the run's output.
+    assert passed["script"] == "features/android/EXAMPLE-1/buy-100-usd.feature", passed["script"]
     assert [s["label"] for s in passed["screenshots"]] == ["signed in", "foreign exchange screen", "confirmation screen", "100 USD confirmation"], passed["screenshots"]
     assert (OUT / "cases" / "android_buy-100-usd" / passed["screenshots"][0]["file"]).is_file()
 

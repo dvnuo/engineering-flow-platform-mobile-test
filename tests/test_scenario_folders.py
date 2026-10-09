@@ -60,6 +60,21 @@ def test_scenario_folders_and_old_issue_folders(tmp_path, monkeypatch):
 def test_the_hooks_find_the_issue_of_a_scenario_folder():
     assert hooks.feature_location(str(Path("features") / "android" / "FX-12" / "sign-in" / "sign-in.feature")) == ("android", "FX-12")
     assert hooks.feature_location(str(Path("features") / "ios" / "FX-12" / "FX-12.feature")) == ("ios", "FX-12")
+    assert hooks.feature_scenario_folder(str(Path("features") / "android" / "FX-12" / "sign-in" / "sign-in.feature")) == "sign-in"
+    assert hooks.feature_scenario_folder(str(Path("features") / "ios" / "FX-12" / "FX-12.feature")) == ""
+
+
+def test_two_scenarios_with_one_title_keep_their_own_rows(tmp_path, monkeypatch):
+    # The config maps titles to ids, so a title two scenarios share keeps only
+    # one id there; a scenario folder's name is the row's id instead.
+    monkeypatch.setattr(run, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(hooks, "REPO_ROOT", tmp_path)
+    for scenario in ("buy-100-usd", "buy-250-eur"):
+        _write(tmp_path / "features" / "android" / "FX-12" / scenario / f"{scenario}.feature", FEATURE.format(key="FX-12", title="Buy currency within the daily limit"))
+        _write(tmp_path / "features" / "android" / "FX-12" / scenario / "steps" / "s.py", "")
+    _write(tmp_path / "config" / "FX-12.android.yaml", "scenarios:\n  Buy currency within the daily limit: buy-250-eur\n")
+    rows = [r for d in run.feature_dirs() for r in run.enumerate_rows(d, [])]
+    assert [r.id for r in rows] == ["android/buy-100-usd", "android/buy-250-eur"]
 
 
 def test_check_fails_on_a_step_without_a_definition(tmp_path, monkeypatch):

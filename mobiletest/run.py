@@ -116,6 +116,9 @@ def enumerate_rows(directory, tags):
 
     platform, issue = location(directory)
     cfg = load_config(platform, issue)
+    # A scenario folder is named after its scenario: that is the row's id,
+    # whatever the scenario's title.
+    folder_id = directory.name if directory.parent.name == issue else ""
     selected = _selected_names(directory, tags)
     rows = []
     for feature_file in sorted(directory.glob("*.feature")):
@@ -131,7 +134,7 @@ def enumerate_rows(directory, tags):
                 values = dict(zip(headings, cells))
                 example = values.get("example") or (cells[0] if cells else "")
                 title = scenario.name.strip()
-                case_id = cfg["scenarios"].get(title) or report.slug(title)
+                case_id = folder_id or cfg["scenarios"].get(title) or report.slug(title)
                 rows.append(Row(directory, platform, issue, case_id, example, s.name, feature_file, [str(t) for t in s.effective_tags]))
     return rows
 

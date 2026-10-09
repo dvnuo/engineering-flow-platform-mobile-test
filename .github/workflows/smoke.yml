@@ -12,7 +12,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install -r requirements.txt pytest
+      - name: Unit tests, including the gestures the device replay makes
+        run: python -m pytest -q tests
       - name: Step definitions bind to every feature
         # One behave dry run per folder: each scenario folder has steps of its own.
         run: python -m mobiletest.run --check

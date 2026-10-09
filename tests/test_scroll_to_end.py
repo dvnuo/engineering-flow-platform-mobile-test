@@ -39,11 +39,27 @@ def test_a_screen_still_moving_after_the_limit_fails():
     assert driver.swipes == 4
 
 
-def test_the_default_limit_is_the_devices():
+def test_the_exported_limit_is_the_devices():
     driver = Scrolling([str(i) for i in range(100)])
     with pytest.raises(AssertionError, match="after 8 swipes"):
-        actions.scroll_to_end(driver, settle=0)
+        actions.scroll_to_end(driver, max_swipes=8, settle=0)
     assert driver.swipes == 8
+
+
+def test_back_to_an_earlier_screen_is_the_end_as_on_the_device():
+    # A spinner at the end of the list: the screens alternate.
+    driver = Scrolling(["top", "end", "end-spinning", "end", "end-spinning"])
+    assert actions.scroll_to_end(driver, max_swipes=8, settle=0) == 3
+    assert driver.swipes == 3
+
+
+def test_a_call_without_a_limit_keeps_the_older_exports_behaviour():
+    # An issue exported before scenario scripts writes no limit: up to 30
+    # swipes, and the end not reached is not a failure there.
+    driver = Scrolling([str(i) for i in range(12)] + ["11"])
+    assert actions.scroll_to_end(driver, settle=0) == 12
+    driver = Scrolling([str(i) for i in range(100)])
+    assert actions.scroll_to_end(driver, settle=0) == 30
 
 
 class Searching(Scrolling):
@@ -66,6 +82,14 @@ def test_scroll_to_swipes_at_most_max_scrolls_times(monkeypatch):
     with pytest.raises(AssertionError):
         actions.scroll_to(driver, ("id", "fees"), max_scrolls=3, timeout=0)
     assert driver.swipes == 3, "no swipe after the last look"
+
+
+def test_an_optional_scroll_to_that_finds_nothing_passes(monkeypatch):
+    monkeypatch.setattr(actions.time, "sleep", lambda s: None)
+    monkeypatch.setattr(actions, "DEFAULT_TIMEOUT", 0)
+    driver = Searching(found_after=99)
+    assert actions.scroll_to(driver, ("id", "fees"), max_scrolls=2, timeout=0, optional=True) is None
+    assert driver.swipes == 2
 
 
 def test_scroll_to_looks_down_with_a_swipe_up(monkeypatch):

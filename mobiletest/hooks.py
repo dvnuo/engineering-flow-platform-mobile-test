@@ -39,6 +39,17 @@ def feature_location(filename):
     return "android", Path(filename).stem
 
 
+def feature_scenario_folder(filename):
+    """The scenario id of a feature in a scenario folder,
+    features/<platform>/<KEY>/<id>/<id>.feature; "" for an issue exported as
+    one feature."""
+    parts = Path(filename).resolve().parts
+    for i in range(len(parts) - 1, 0, -1):
+        if parts[i] in ("android", "ios") and i + 1 < len(parts):
+            return parts[i + 2] if i + 3 < len(parts) else ""
+    return ""
+
+
 def load_config(platform, key):
     path = REPO_ROOT / "config" / f"{key}.{platform}.yaml"
     if not path.is_file():
@@ -68,6 +79,11 @@ def before_feature(context, feature):
     context.platform, context.issue = feature_location(feature.filename)
     context.cfg = load_config(context.platform, context.issue)
     context.feature_file = str(Path(feature.filename).as_posix())
+    # A scenario folder names its scenario; its feature sits in the run's
+    # output next to the others of the issue, as the matrix says.
+    context.scenario_folder = feature_scenario_folder(feature.filename)
+    name = Path(feature.filename).name
+    context.script_path = f"features/{context.platform}/{context.issue}/{name}" if context.scenario_folder else f"features/{context.platform}/{context.issue}.feature"
 
 
 def before_scenario(context, scenario):
@@ -75,7 +91,7 @@ def before_scenario(context, scenario):
     context.row = dict(zip(row.headings, row.cells)) if row is not None else {}
     context.data = dict(context.cfg.get("data") or {})
     title = scenario.name.split(" -- @")[0].strip()
-    case_id = context.cfg["scenarios"].get(title) or evidence.safe_name(title.lower(), "scenario")
+    case_id = getattr(context, "scenario_folder", "") or context.cfg["scenarios"].get(title) or evidence.safe_name(title.lower(), "scenario")
     example = context.row.get("example") or (row.cells[0] if row is not None and row.cells else "") or ""
     context.case_id, context.example = case_id, example
     context.row_id = f"{context.platform}/{case_id}#{example}" if example else f"{context.platform}/{case_id}"
@@ -180,7 +196,7 @@ def _write_evidence(context, status):
         "session_id": context.session_id,
         "session_url": info.get("public_url", ""),
         "video_url": info.get("video_url", ""),
-        "script": f"features/{context.platform}/{context.issue}.feature",
+        "script": getattr(context, "script_path", "") or f"features/{context.platform}/{context.issue}.feature",
     }
     if context.collect_video and info.get("video_url"):
         try:

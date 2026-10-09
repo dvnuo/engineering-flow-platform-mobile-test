@@ -6,8 +6,10 @@ script on the device (internal/mobileauto/commands/observe_actions.go in
 engineering-flow-platform-tools): a swipe is move (0 ms) to start, down,
 pause for hold_ms, move over duration_ms to end, pause for end_hold_ms, up;
 a tap is move, down, pause for hold_ms, up. A point given in percent is
-floor(window.x + window.width * percent / 100 + 0.5), as the device rounds
-it. tests/test_literal_gestures.py pins the sequences both sides send.
+window.x + window.width * percent / 100, and an element's centre is
+x + width / 2, both rounded half away from zero as Go's math.Round rounds
+them on the device. tests/test_literal_gestures.py pins the sequences both
+sides send.
 """
 import math
 import time
@@ -30,6 +32,9 @@ DIRECTION_PERCENTS = {
 DEFAULT_SWIPE_MS = 500
 # mobile-auto scroll-to's limit: how many swipes before it gives up.
 DEFAULT_MAX_SCROLLS = 8
+# scroll_to_end's limit for a call that names none: what an issue exported
+# before scenario scripts relies on.
+LEGACY_MAX_SWIPES = 30
 
 
 def _found(driver, locator, kwargs):
@@ -70,10 +75,18 @@ def _window(driver):
         return 0.0, 0.0, float(size["width"]), float(size["height"])
 
 
+def _go_round(value):
+    """Round half away from zero, exactly as Go's math.Round does."""
+    whole = math.trunc(value)
+    if abs(value - whole) >= 0.5:
+        return int(whole + math.copysign(1, value))
+    return int(whole)
+
+
 def _px(origin, size, percent):
     """A coordinate in percent of the window, rounded the way the device
     rounds it (half away from zero)."""
-    return int(math.floor(origin + size * float(percent) / 100 + 0.5))
+    return _go_round(origin + size * float(percent) / 100)
 
 
 def _point(window, x_percent, y_percent):
@@ -102,7 +115,7 @@ def _gesture(driver, steps):
 
 def _center(element):
     r = element.rect
-    return int(round(r["x"] + r["width"] / 2)), int(round(r["y"] + r["height"] / 2))
+    return _go_round(r["x"] + r["width"] / 2), _go_round(r["y"] + r["height"] / 2)
 
 
 def long_press(driver, locator, duration_ms=800, **kwargs):
@@ -164,7 +177,9 @@ def _finger(direction):
 
 def scroll_to(driver, locator, direction="down", max_scrolls=DEFAULT_MAX_SCROLLS, **kwargs):
     """Swipe until the element is on screen, then return it: at most
-    max_scrolls swipes, like mobile-auto scroll-to."""
+    max_scrolls swipes, like mobile-auto scroll-to. An optional step that
+    never finds it returns None, as the device's replay passes it."""
+    optional = bool(kwargs.pop("optional", False))
     kwargs.setdefault("timeout", 1)
     kwargs["optional"] = True
     limit = max(int(max_scrolls), 0)
@@ -176,25 +191,38 @@ def scroll_to(driver, locator, direction="down", max_scrolls=DEFAULT_MAX_SCROLLS
             break
         swipe(driver, _finger(direction))
         time.sleep(0.3)
-    kwargs["optional"] = False
+    kwargs["optional"] = optional
     kwargs["timeout"] = DEFAULT_TIMEOUT
     return find(driver, locator, **kwargs)
 
 
-def scroll_to_end(driver, direction="down", max_swipes=DEFAULT_MAX_SCROLLS, settle=0.3):
-    """Swipe through a list or a long text until the screen stops changing,
-    and return the number of swipes it took. Still changing after max_swipes
-    is a failure, as on the device: the end was not reached."""
+def scroll_to_end(driver, direction="down", max_swipes=None, settle=0.3):
+    """Swipe through a list or a long text until the end, and return the
+    number of swipes it took.
+
+    With max_swipes, as a scenario script's export always writes it, this is
+    the device's scroll to an edge: it stops when the screen shows what it
+    showed before (unchanged, or back to an earlier screen), and still
+    changing after max_swipes is a failure: the end was not reached. Without
+    it, as an issue exported before scenario scripts calls it, it stops when
+    the screen stops changing, or quietly after 30 swipes, as it always did.
+    """
+    legacy = max_swipes is None
+    limit = LEGACY_MAX_SWIPES if legacy else max(int(max_swipes), 0)
     before = _source(driver)
+    seen = {before}
     swipes = 0
-    for _ in range(max(int(max_swipes), 0)):
+    for _ in range(limit):
         swipe(driver, _finger(direction))
         swipes += 1
         time.sleep(settle)
         after = _source(driver)
-        if after == before:
+        if after == before or (not legacy and after in seen):
             return swipes
+        seen.add(after)
         before = after
+    if legacy:
+        return swipes
     raise AssertionError(f"the screen was still changing after {swipes} swipes; the end was not reached")
 
 

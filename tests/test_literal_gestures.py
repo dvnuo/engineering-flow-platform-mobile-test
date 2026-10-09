@@ -40,6 +40,16 @@ CANONICAL = [
         'tap_point(context.driver, x_percent=50, y_percent=62.5, hold_ms=100)',
         '[{"type":"pointerMove","duration":0,"x":540,"y":1500},{"type":"pointerDown","button":0},{"type":"pause","duration":100},{"type":"pointerUp","button":0}]',
     ),
+    (
+        "coordinate tap on a half pixel",
+        'tap_point(context.driver, x_percent=51.25, y_percent=50)',
+        '[{"type":"pointerMove","duration":0,"x":554,"y":1200},{"type":"pointerDown","button":0},{"type":"pointerUp","button":0}]',
+    ),
+    (
+        "swipe from a half pixel",
+        'swipe(context.driver, start=(51.25, 62.5), end=(51.25, 37.5), duration_ms=750)',
+        '[{"type":"pointerMove","duration":0,"x":554,"y":1500},{"type":"pointerDown","button":0},{"type":"pointerMove","duration":750,"x":554,"y":900},{"type":"pointerUp","button":0}]',
+    ),
 ]
 
 
@@ -63,6 +73,16 @@ def test_one_finger_named_like_the_device_one():
     command, params = sent[0]
     source = params["actions"][0]
     assert command == "actions" and source["type"] == "pointer" and source["id"] == "finger1" and source["parameters"] == {"pointerType": "touch"}
+
+
+def test_element_centres_round_half_away_from_zero_like_the_device():
+    class Element:
+        rect = {"x": 0, "y": 0, "width": 101, "height": 41}
+
+    # Go's math.Round gives (51, 21); Python's round() would give (50, 20).
+    assert actions._center(Element()) == (51, 21)
+    Element.rect = {"x": -101, "y": 0, "width": 101, "height": 2}
+    assert actions._center(Element()) == (-51, 1)
 
 
 def test_points_round_half_away_from_zero_like_the_device():
