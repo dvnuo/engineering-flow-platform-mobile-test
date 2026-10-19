@@ -20,7 +20,7 @@ After the export, the Python is the source: fixes go into the scenario's step de
 | `features/<platform>/<KEY>/<id>/<id>.feature` | One scenario of a Jira issue on one platform: a plain Scenario, its values in its steps |
 | `features/<platform>/<KEY>/<id>/steps/<id>_steps.py` | Its step definitions: the recorded actions, in order, as literal `mobiletest` calls; passwords come from `secret("NAME")` |
 | `features/<platform>/<KEY>/<id>/environment.py` | behave hooks (imports `mobiletest.hooks`): one BrowserStack session per scenario, evidence per scenario |
-| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`public` for an app that needs no tunnel; left out, or anything else, the session goes through the BrowserStack Local tunnel), the Appium version BrowserStack runs (`appium_version`, 2.19.0 unless set; `BROWSERSTACK_APPIUM_VERSION` overrides it for a run), the secrets the tests need, and the scenario titles' ids |
+| `config/<KEY>.<platform>.yaml` | The app (a custom id or `bs://` URL), device, OS version, network (`public` for an app that needs no tunnel; left out, or anything else, the session goes through the BrowserStack Local tunnel), the Appium version BrowserStack runs (`appium_version`, 2.19.0 unless set; `BROWSERSTACK_APPIUM_VERSION` overrides it for a run), on iOS the answer to the App Tracking Transparency prompt (`tracking`: `deny`, `allow`, or `leave`; see below), the secrets the tests need, and the scenario titles' ids |
 | `mobiletest/` | The helpers: `find` with fallbacks and drift detection, actions, checks with timeouts, screenshots, the session, the runner, and the report |
 | `runs/<label>/` | A run's results (not committed): `matrix.json`, `cucumber/cucumber.json`, `junit/`, `cases/<row>/evidence.json` with screenshots and video, `logs/` |
 
@@ -54,6 +54,14 @@ The runner starts one `behave` process per scenario, prints the matrix as `EFP-M
 The gestures (`swipe`, `tap_point`, `long_press`, `double_tap`) send the same W3C actions as mobile-auto's replay of the script on the device, so a scenario that passed its replay makes the same moves here; `tests/test_literal_gestures.py` pins them.
 
 `MOBILETEST_FAKE_DRIVER=1` runs everything against a stand-in driver, without a device or an account: the smoke test in `tests/` uses it to check the project, the runner, and the report end to end.
+
+### The tracking prompt (iOS)
+
+Every BrowserStack session installs the app afresh, so on iOS its first start shows the App Tracking Transparency prompt (*Allow "X" to track your activity across other companies' apps and websites?*, with *Ask App Not to Track* and *Allow*), which iOS draws over the app; the app waits behind it, and so would the scenario's first step. The session start answers it, outside the scenario, before the first step runs (`mobiletest/alerts.py`), the same way the Portal's Mobile testing panel answers it when a scenario is recorded, so a recording and its exported scenario see the same first screen and no script holds a tap on the prompt.
+
+- The policy is the config's `tracking:` (`deny`, `allow`, or `leave`), else the environment's `MOBILETEST_TRACKING`, else `deny`: `deny` presses *Ask App Not to Track*, `allow` presses *Allow*, `leave` leaves the prompt on the screen and only reports it. Any other value fails the scenario before a device is taken. On Jenkins, `MOBILETEST_TRACKING` can be a folder property or an environment variable of the agent, like the job's other settings.
+- The screen is watched for `MOBILETEST_LAUNCH_ALERT_WAIT` seconds (10; `0` switches the watch off), once a second, and two seconds more after the answer for a prompt that follows. The prompt is told by its deny button, or, on a device in another language, by *track your activity* in its text (then its first button is deny and its last allow). Any other system prompt is reported with its buttons and left alone, since what it asks is the scenario's business (`accept_permission` and `deny_permission` in the steps); BrowserStack's session-wide `autoAcceptAlerts`/`autoDismissAlerts` are not used, because they would answer the app's own dialogs too.
+- The row's log says what happened (`launch alerts (<row>): ...`), and so does `launch_alerts` in its `evidence.json` (`policy`, `seen`, `kind` `tracking` or `other`, `buttons`, `text`, `action` `pressed`, `left`, `none`, or `failed`, `button`, `followed_by`, `took_ms`, `note`, and `error` when Appium failed the watch, which is a warning, never the scenario's failure). Android sessions are not watched.
 
 ### Test users
 

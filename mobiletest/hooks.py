@@ -198,6 +198,9 @@ def _write_evidence(context, status):
         "video_url": info.get("video_url", ""),
         "script": getattr(context, "script_path", "") or f"features/{context.platform}/{context.issue}.feature",
     }
+    launch_alerts = session.launch_alerts(getattr(context, "driver", None))
+    if launch_alerts:
+        doc["launch_alerts"] = launch_alerts
     if context.collect_video and info.get("video_url"):
         try:
             session.download(info["video_url"], os.path.join(rec.dir, "video.mp4"))
