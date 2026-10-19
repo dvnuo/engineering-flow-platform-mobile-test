@@ -13,8 +13,8 @@ from selenium.common.exceptions import NoAlertPresentException, WebDriverExcepti
 from mobiletest import alerts, evidence, hooks, session
 
 ATT = ["Ask App Not to Track", "Allow"]
-ATT_TEXT = "Allow “Bank” to track your activity across other companies’ apps and websites?"
-NOTIFICATIONS = ["Don’t Allow", "Allow"]
+ATT_TEXT = "Allow \u201cBank\u201d to track your activity across other companies\u2019 apps and websites?"
+NOTIFICATIONS = ["Don\u2019t Allow", "Allow"]
 
 
 class AlertDriver:
@@ -130,10 +130,10 @@ def test_a_screen_without_a_prompt_is_quiet(by_message):
 
 
 def test_other_prompts_are_reported_and_left_alone():
-    driver = AlertDriver(buttons=NOTIFICATIONS, text="“Bank” Would Like to Send You Notifications")
+    driver = AlertDriver(buttons=NOTIFICATIONS, text="\u201cBank\u201d Would Like to Send You Notifications")
     record = Clock().settle(driver, alerts.ALLOW)
     assert record["seen"] and record["kind"] == "other" and record["action"] == "left" and driver.presses == []
-    assert "not App Tracking Transparency" in record["note"] and "Don’t Allow / Allow" in record["note"]
+    assert "not App Tracking Transparency" in record["note"] and "Don\u2019t Allow / Allow" in record["note"]
     # A prompt that follows the answered one is reported, not pressed.
     driver = AlertDriver(buttons=ATT, text=ATT_TEXT, after=NOTIFICATIONS)
     record = Clock().settle(driver, alerts.DENY)
