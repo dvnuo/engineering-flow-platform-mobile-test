@@ -12,6 +12,8 @@ from appium import webdriver
 from appium.options.android import UiAutomator2Options
 from appium.options.ios import XCUITestOptions
 
+from mobiletest import alerts
+
 DEFAULT_HUB = "https://hub-cloud.browserstack.com/wd/hub"
 DEFAULT_API = "https://api-cloud.browserstack.com"
 # BrowserStack's own default, Appium 1.22.0, predates the mobile: commands the
@@ -98,12 +100,31 @@ def capabilities(config, session_name, build_name=None, project_name=None):
 
 
 def start(config, session_name, build_name=None, project_name=None):
-    """A BrowserStack device with the build the config names."""
+    """A BrowserStack device with the build the config names, its App
+    Tracking Transparency prompt answered on iOS (see mobiletest.alerts); the
+    record of that is the driver's efp_launch_alerts, for the evidence."""
     if os.environ.get("MOBILETEST_FAKE_DRIVER"):
         from mobiletest.fake import FakeDriver
 
         return FakeDriver(config.get("platform", "android"), session_name)
-    return webdriver.Remote(hub_url(), options=capabilities(config, session_name, build_name, project_name))
+    # A bad policy fails here, before a device is taken.
+    policy = alerts.tracking_policy(config)
+    wait = alerts.launch_alert_wait()
+    driver = webdriver.Remote(hub_url(), options=capabilities(config, session_name, build_name, project_name))
+    if str(config.get("platform", "android")).lower() == "ios" and wait > 0:
+        record = alerts.settle_launch_alerts(driver, policy, wait)
+        line = f"launch alerts ({session_name}): {record['note']}"
+        if record.get("error"):
+            line = "warning: " + line
+        print(line, flush=True)
+        driver.efp_launch_alerts = record
+    return driver
+
+
+def launch_alerts(driver):
+    """What the session start found and did about the launch prompts; None
+    for a session that was not watched (Android, the stand-in driver)."""
+    return getattr(driver, "efp_launch_alerts", None)
 
 
 def set_status(driver, passed, reason=""):
